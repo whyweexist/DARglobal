@@ -11,8 +11,8 @@ async def main():
     p = argparse.ArgumentParser(description="Authorized Wasalt ingestion")
     p.add_argument("--max-pages", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--engine", choices=("httpx", "scrapling"), default=None,
-                   help="Select HTTPX or the optional Scrapling HTTP/CSS engine")
+    p.add_argument("--engine", choices=("httpx", "scrapling", "apify"), default=None,
+                   help="Select HTTPX, Scrapling, or the approved Apify feed")
     p.add_argument("--query", default="", help="Focus collection on a city, property type or sale/rent")
     args = p.parse_args()
     initialize()

@@ -18,6 +18,7 @@ app/db/models.py
 app/db/schema.py
 app/db/session.py
 app/ingestion/__init__.py
+app/ingestion/apify_wasalt.py
 app/ingestion/crawler.py
 app/ingestion/darglobal.py
 app/ingestion/fetchers.py
@@ -39,6 +40,7 @@ app/rag/chunker.py
 app/rag/embeddings.py
 app/rag/grounding.py
 app/rag/indexer.py
+app/rag/property_query.py
 app/rag/retrieval.py
 estate_intelligence.egg-info/PKG-INFO
 estate_intelligence.egg-info/SOURCES.txt
@@ -46,6 +48,7 @@ estate_intelligence.egg-info/dependency_links.txt
 estate_intelligence.egg-info/requires.txt
 estate_intelligence.egg-info/top_level.txt
 tests/test_api.py
+tests/test_apify_wasalt.py
 tests/test_chat_regressions.py
 tests/test_docker_context.py
 tests/test_pipeline.py

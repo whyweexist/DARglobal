@@ -161,7 +161,7 @@ async def sources():
             latest = db.scalars(select(IngestionRun).where(IngestionRun.source_id == src.id)
                                 .order_by(IngestionRun.id.desc()).limit(1)).first()
             result.append({"id": src.id, "name": src.name, "url": src.base_url,
-                           "documents": count, "permitted": (settings().wasalt_permitted if src.id == "wasalt" else settings().darglobal_enabled),
+                           "documents": count, "engine": settings().effective_wasalt_engine if src.id == "wasalt" else settings().scraper_engine, "permitted": (settings().wasalt_permitted if src.id == "wasalt" else settings().darglobal_enabled),
                            "permission_note": src.permission_note or ("Authorization required" if src.id == "wasalt" else "Not yet evaluated"),
                            "last_success": str(src.last_success) if src.last_success else None,
                            "last_run_status": latest.status if latest else "not_run"})

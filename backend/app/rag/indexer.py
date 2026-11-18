@@ -14,30 +14,36 @@ from app.ingestion.properties import save_structured
 log = logging.getLogger(__name__)
 
 
-def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "authorized_crawl") -> str:
+def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "authorized_crawl", *, observed_at: datetime | None = None) -> str:
     if not page.sections:
         return "skipped"
+    stamp = observed_at or datetime.now(timezone.utc)
     content = page.text
     hash_material = content + "\n" + json.dumps(page.facts, sort_keys=True, ensure_ascii=False) if source == "wasalt" else content
-    digest = hashlib.sha256(hash_material.encode("utf-8")).hexdigest()
     cfg = settings()
+    # Chunk format and configuration changes invalidate existing materialization.
+    digest = hashlib.sha256((f"sections-v2:{cfg.chunk_target_tokens}:{cfg.chunk_max_tokens}:{cfg.chunk_overlap_tokens}\n"+hash_material).encode("utf-8")).hexdigest()
     builder = StructureAwareChunker(target=cfg.chunk_target_tokens, maximum=cfg.chunk_max_tokens, overlap=cfg.chunk_overlap_tokens)
-    chunks = builder.chunk(page.sections)
+    # Repeat the entity identity in every section, not arbitrary homepage text.
+    chunks = builder.chunk([(heading if page.title.casefold() in heading.casefold() else f"{page.title} — {heading}", body) for heading,body in page.sections])
     if not chunks:
         return "skipped"
     old_chunk_ids: list[int] = []
     with session_factory()() as db:
         doc = db.scalars(select(Document).where(Document.url == url)).first()
+        if doc and observed_at and doc.fetched_at.replace(tzinfo=timezone.utc) > stamp:
+            return "skipped"
         if doc and doc.content_hash == digest:
-            doc.fetched_at = datetime.now(timezone.utc)
+            doc.fetched_at = stamp
+            doc.method = method
             if page.facts.get("properties"):
-                save_structured(source, url, page.facts["properties"], session=db)
+                save_structured(source, url, page.facts["properties"], session=db, observed_at=stamp)
             db.commit()
             return "skipped"
         outcome = "updated" if doc else "inserted"
         if not doc:
             doc = Document(source_id=source, url=url, title=page.title, content=content,
-                           content_hash=digest, language=page.language, method=method)
+                           content_hash=digest, language=page.language, method=method, fetched_at=stamp)
             db.add(doc)
             db.flush()
         else:
@@ -49,12 +55,12 @@ def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "autho
             db.flush()
             doc.title, doc.content, doc.content_hash = page.title, content, digest
             doc.language, doc.method = page.language, method
-            doc.fetched_at = datetime.now(timezone.utc)
+            doc.fetched_at = stamp
         for idx, c in enumerate(chunks):
             db.add(Chunk(document_id=doc.id, ordinal=idx, heading=c.heading,
                          text=c.text, tokens=c.tokens, checksum=c.checksum))
         if page.facts.get("properties"):
-            save_structured(source, url, page.facts["properties"], session=db)
+            save_structured(source, url, page.facts["properties"], session=db, observed_at=stamp)
         elif source == "wasalt" and method.endswith("crawl"):
             db.execute(delete(Property).where(Property.source_id == source, Property.url == url))
         db.commit()

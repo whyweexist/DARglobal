@@ -61,6 +61,15 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
             if budget <= 0:
                 activities.append(SearchActivity(name, 'skipped', f'{source}: live page budget exhausted'))
                 continue
+            if source == 'wasalt' and cfg.effective_wasalt_engine == 'apify':
+                from app.ingestion.apify_wasalt import scrape_apify
+                from app.ingestion.jobs import record_ingestion
+                report = await scrape_apify(query=query, live=True)
+                await asyncio.to_thread(record_ingestion, report)
+                count = len(report.urls)
+                activities.append(SearchActivity('apify_wasalt', 'completed' if count else report.status, report.detail, count))
+                budget -= 1
+                continue
             base = 'https://darglobal.co.uk' if source == 'darglobal' else 'https://wasalt.sa'
             entries = [DARGLOBAL_CATALOG] if source == 'darglobal' else seed_urls(query)
             entry = entries[0]
@@ -79,7 +88,7 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                 source_budget -= 1
                 attempted.add(url)
                 try:
-                    page = await fetch_allowed_page(client, policy, url, source, engine=cfg.scraper_engine, session=session)
+                    page = await fetch_allowed_page(client, policy, url, source, engine=cfg.effective_wasalt_engine if source == "wasalt" else cfg.scraper_engine, session=session)
                     links.update(catalog_links(page.html, page.url, source))
                     parsed = parse_html(page.html, source, url=page.url)
                     if not parsed.sections:

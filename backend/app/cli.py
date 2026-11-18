@@ -63,6 +63,9 @@ def main():
                           "openrouter_configured": bool(settings().openrouter_api_key),
                           "wasalt_authorized": settings().wasalt_permitted,
                           "scraper_engine": settings().scraper_engine,
+                          "wasalt_engine": settings().effective_wasalt_engine,
+                          "apify_configured": bool(settings().apify_enabled and settings().apify_token),
+                          "apify_live_search": settings().apify_live_search,
                           "scrapling_installed": scrapling_available(),
                           "scrapling_version": version("scrapling") if scrapling_available() else None}))
     elif args.command == "check-ai":

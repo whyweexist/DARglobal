@@ -296,3 +296,7 @@ Application source code is offered under the MIT license. Rights to source-site 
 ### Diagnose missing evidence
 
 If chat returns `no_evidence`, run `make local-doctor`, `make local-scrape-darglobal ARGS="--engine httpx --max-pages 40"`, `make local-index`, `make search Q="DG1 Dubai amenities"`, and `make local-check-ai`. The scraper now prioritizes the official project catalogue and the live tool uses visible project-card labels to discover relevant pages. Inspect per-page `failures` and research activity for precise access/HTTP/extraction errors. No source restrictions are bypassed. See `docs/troubleshooting.md`.
+
+## Authorized Wasalt provider (Apify)
+
+See [docs/apify.md](docs/apify.md) for the optional Apify provider, exact configuration, dry-run/ingestion commands, billing controls, data contract and limitations. It is integrated into CLI, normal ingestion, the worker and opt-in live RAG search. The existing HTTPX/Scrapling paths are unchanged as selectable alternatives. The research interface now shows full example questions, selected ingestion engine, source observation dates, and a dedicated conversation scroll region with a Latest message control.

@@ -24,10 +24,10 @@ def _text(value):
     return str(value).strip()[:200] if isinstance(value, (str, int, float)) else None
 
 
-def save_structured(source: str, url: str, records: list[dict], *, session: Session | None = None):
+def save_structured(source: str, url: str, records: list[dict], *, session: Session | None = None, observed_at=None):
     if session is None:
         with session_factory()() as db:
-            save_structured(source, url, records, session=db)
+            save_structured(source, url, records, session=db, observed_at=observed_at)
             db.commit()
         return
     db = session
@@ -59,7 +59,7 @@ def save_structured(source: str, url: str, records: list[dict], *, session: Sess
         property_row.area = _float((item.get("floorSize") or {}).get("value") if isinstance(item.get("floorSize"), dict) else None)
         property_row.bedrooms = _int(item.get("numberOfBedrooms"))
         property_row.bathrooms = _int(item.get("numberOfBathroomsTotal"))
-        property_row.facts = {"jsonld_type": item.get("@type", ""), "source": item.get("extraction_method", "source_jsonld"), "rental_period": item.get("rental_period")}
-        property_row.observed_at = utcnow()
+        property_row.facts = {"jsonld_type": item.get("@type", ""), "source": item.get("extraction_method", "source_jsonld"), "rental_period": item.get("rental_period"), "district": item.get("district"), "amenities": item.get("amenities", []), "quality_flags": item.get("quality_flags", [])}
+        property_row.observed_at = observed_at or utcnow()
         if not existing:
             db.add(property_row)

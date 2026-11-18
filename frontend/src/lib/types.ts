@@ -1,5 +1,5 @@
 export type Model = { id: string; name: string; free: boolean; tools: boolean; context_length: number | null };
-export type Source = { id: string; name: string; documents: number; permitted: boolean;
+export type Source = { id: string; name: string; documents: number; engine?: string; permitted: boolean;
   permission_note: string; last_success: string | null; last_run_status: string };
 export type Citation = { id: string; title: string; source: string; url: string;
   fetched_at: string; excerpt: string };

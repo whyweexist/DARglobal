@@ -19,9 +19,9 @@ migrate: init-env
 ingest: init-env
 	$(API) python -m app.cli ingest
 scrape-darglobal: init-env
-	$(API) python /app/scripts/scrape_darglobal.py
+	$(API) python /app/scripts/scrape_darglobal.py $(ARGS)
 scrape-wasalt: init-env
-	$(API) python /app/scripts/scrape_wasalt.py
+	$(API) python /app/scripts/scrape_wasalt.py $(ARGS)
 refresh: init-env
 	$(API) python -m app.cli ingest --force
 index: init-env

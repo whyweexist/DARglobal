@@ -10,7 +10,11 @@ const SUGGESTIONS = [
   { icon: Building2, title: 'Development portfolio', query: 'What developments are documented for DarGlobal in Dubai?', label: 'RESEARCH' },
   { icon: MapPin, title: 'Explore by region', query: 'Which DarGlobal developments are documented in Oman?', label: 'GEOGRAPHY' },
   { icon: Layers3, title: 'Cross-source analysis', query: 'What verifiable information connects DarGlobal and Wasalt?', label: 'DISCOVERY' },
-  { icon: Search, title: 'Saudi property listings', query: 'Show apartments for sale in Riyadh on Wasalt.', label: 'MARKETPLACE' },
+  { icon: Search, title: 'Riyadh apartments', query: 'Show Wasalt apartments for sale in Riyadh with 2 bedrooms under 1 million SAR.', label: 'MARKETPLACE' },
+  { icon: Building2, title: 'Rental shortlist', query: 'Find villas for rent in Jeddah on Wasalt. Include rent period and area where documented.', label: 'RENTALS' },
+  { icon: Layers3, title: 'Project specifications', query: 'What amenities and apartment types are documented for DG1 in Dubai?', label: 'PROJECT DETAILS' },
+  { icon: MapPin, title: 'Size and amenities', query: 'Which Wasalt apartments in Riyadh have documented swimming pools and floor areas?', label: 'FEATURES' },
+  { icon: Globe2, title: 'Arabic research', query: 'اعرض شقق للبيع في الرياض من وصلت مع السعر والمساحة', label: 'العربية' },
 ];
 const sourceName = (s: string) => s === 'darglobal' ? 'DarGlobal' : 'Wasalt';
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -84,7 +88,18 @@ export default function Home(){
   const [history,setHistory]=useState<{id:string;token:string;title:string;updatedAt:number}[]>([]);
   const [toast,setToast]=useState('');
   const inputRef=useRef<HTMLTextAreaElement>(null);
-  const bottomRef=useRef<HTMLDivElement>(null);
+  const scrollRef=useRef<HTMLDivElement>(null);
+  const followScroll=useRef(true);
+  const [showJump,setShowJump]=useState(false);
+  const scrollToLatest=useCallback(()=>{
+    const el=scrollRef.current;
+    if(el){el.scrollTop=el.scrollHeight;followScroll.current=true;setShowJump(false);}
+  },[]);
+  const trackScroll=()=>{
+    const el=scrollRef.current;if(!el)return;
+    const near=el.scrollHeight-el.scrollTop-el.clientHeight<120;
+    followScroll.current=near;setShowJump(!near);
+  };
   const abortRef=useRef<AbortController|null>(null);
 
   useEffect(()=>{
@@ -145,19 +160,23 @@ export default function Home(){
       setOnline(c.status==='fulfilled'&&c.value.status==='ready');
     };load().catch(()=>setOnline(false));return()=>{active=false;};
   },[]);
-  useEffect(()=>bottomRef.current?.scrollIntoView({behavior:busy?'smooth':'auto'}),[messages,activity,busy]);
+  useEffect(()=>{
+    if(!messages.length){if(scrollRef.current)scrollRef.current.scrollTop=0;return;}
+    if(!followScroll.current)return;
+    const id=requestAnimationFrame(scrollToLatest);return()=>cancelAnimationFrame(id);
+  },[messages,activity,busy,scrollToLatest]);
   useEffect(()=>{if(toast){const id=setTimeout(()=>setToast(''),2500);return()=>clearTimeout(id)}},[toast]);
 
   const send=useCallback(async(custom?:string)=>{
     const question=(custom??input).trim();if(!question||busy||abortRef.current||question.length<3)return;
-    threadVersion.current++;setInput('');setActivity('Researching verified records');setBusy(true);setSelection(-1);
+    followScroll.current=true;setShowJump(false);threadVersion.current++;setInput('');setActivity('Researching verified records');setBusy(true);setSelection(-1);
     const pending:Message={id:uid(),role:'assistant',text:'',loading:true};
     setMessages(prev=>[...prev,{id:uid(),role:'user',text:question},pending]);
     const controller=new AbortController();abortRef.current=controller;
     const body={message:question,model,source_filter:sourceFilter,conversation_id:conv?.id||null,
       conversation_token:conv?.token||null,allow_live_search:liveSearch};
     let accumulated='';let completed=false;
-    const timer=setTimeout(()=>controller.abort(),125000);
+    const timer=setTimeout(()=>controller.abort(),245000);
     try{
       const res=await fetch('/api/v1/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body),signal:controller.signal});
@@ -199,11 +218,11 @@ export default function Home(){
       if(abortRef.current!==controller)return;
       const msg=controller.signal.aborted?'Request cancelled or timed out':err instanceof Error?err.message:'Unknown request failure';
       setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:`Research request failed: ${msg}`,status:'error',loading:false}:m));
-    }finally{clearTimeout(timer);if(abortRef.current===controller){setBusy(false);setActivity('');abortRef.current=null;inputRef.current?.focus();
+    }finally{clearTimeout(timer);if(abortRef.current===controller){setBusy(false);setActivity('');abortRef.current=null;inputRef.current?.focus({preventScroll:true});
       void fetch('/api/v1/sources',{cache:'no-store'}).then(r=>r.json()).then(d=>{if(Array.isArray(d.sources))setSources(d.sources)}).catch(()=>{});}}
   },[busy,conv,input,liveSearch,model,sourceFilter]);
 
-  const reset=()=>{threadVersion.current++;abortRef.current?.abort();abortRef.current=null;setBusy(false);setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);setEvidenceDrawer(false);setModelOpen(false);};
+  const reset=()=>{followScroll.current=true;setShowJump(false);threadVersion.current++;abortRef.current?.abort();abortRef.current=null;setBusy(false);setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);setEvidenceDrawer(false);setModelOpen(false);};
   const openThread=async(thread:{id:string;token:string;title:string;updatedAt:number})=>{
     if(busy)return;
     const version=++threadVersion.current;
@@ -213,7 +232,7 @@ export default function Home(){
       if(!resp.ok)throw new Error('Conversation is no longer accessible');
       const doc=await resp.json();
       if(version!==threadVersion.current||abortRef.current)return;
-      setMessages((doc.messages||[]).map((m:{role:'user'|'assistant';text:string})=>({id:uid(),role:m.role,text:m.text})));
+      followScroll.current=true;setShowJump(false);setMessages((doc.messages||[]).map((m:{role:'user'|'assistant';text:string})=>({id:uid(),role:m.role,text:m.text})));
       setConv({id:thread.id,token:thread.token});setMobileMenu(false);
     }catch{setToast('Could not retrieve this conversation');}
   };
@@ -244,7 +263,7 @@ export default function Home(){
         {(['darglobal','wasalt'] as const).map((id,index)=>{const src=sources.find(s=>s.id===id);return <button key={id}
           className={`source-option ${sourceFilter.includes(id)?'active':''}`} onClick={()=>toggleSource(id)} aria-pressed={sourceFilter.includes(id)}>
           <div className={`source-icon ${id}`}><Building2 size={17} strokeWidth={1.7}/></div>
-          <span className="source-desc"><strong>{sourceName(id)}</strong><small>{src?.documents??'—'} indexed documents</small></span>
+          <span className="source-desc"><strong>{sourceName(id)}</strong><small>{src?.documents??'—'} indexed documents{src?.engine?` · ${src.engine}`:''}</small></span>
           <span className={`source-checkbox ${sourceFilter.includes(id)?'checked':''}`}>{sourceFilter.includes(id)&&<Check size={12}/>}</span>
         </button>})}
       </div>
@@ -275,7 +294,7 @@ export default function Home(){
       </header>
       <div className={`central-layout ${showEvidence?'has-right':''}`}>
         <section className="conversation-area" inert={evidenceDrawer?true:undefined}>
-          <div className="research-scroll" aria-label="Conversation" tabIndex={0}>
+          <div ref={scrollRef} onScroll={trackScroll} className="research-scroll" aria-label="Conversation" tabIndex={0}>
           {messages.length===0 ? <div className="landing">
             <div className="hero-brow"><span className="tiny-line"/> INTELLIGENCE / REAL ESTATE <span className="hero-brow-number">001—2026</span></div>
             <h1>Every property<br/>has a <em>story.</em><br/><span>Find the facts.</span></h1>
@@ -285,7 +304,7 @@ export default function Home(){
             <div className="suggest-section"><div className="suggest-heading"><span>START EXPLORING</span><span className="right-tip">CURATED RESEARCH PATHS <ArrowDown size={12}/></span></div>
               <div className="suggest-grid">{SUGGESTIONS.map(s=><button key={s.title} className="suggest-card" onClick={()=>send(s.query)}>
                 <div className="suggest-top"><s.icon size={18} strokeWidth={1.6}/><ArrowUpRight size={16}/></div>
-                <div><span className="suggest-tag">{s.label}</span><strong>{s.title}</strong></div></button>)}</div>
+                <div><span className="suggest-tag">{s.label}</span><strong>{s.title}</strong><span className="suggest-query">{s.query}</span></div></button>)}</div>
             </div>
           </div> : <div className="conversation-thread"><div className="conversation-intro"><span>RESEARCH CONVERSATION</span><strong>Evidence-backed analysis</strong><small>{messages.filter(m=>m.role==='user').length} queries · {sourceFilter.map(sourceName).join(' + ')}</small></div>
             {messages.map(m=><div key={m.id} className={`message ${m.role}`}>
@@ -297,8 +316,9 @@ export default function Home(){
                 {m.activity&&m.activity.length>0&&<details className="research-diagnostics"><summary>Research activity</summary>{m.activity.map((a,i)=><p key={i}>{a.status}: {a.detail}</p>)}</details>}
                 {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}{m.fallback&&<span>Fallback used</span>}</div>}
               </div></div>)}
-            <div ref={bottomRef}/></div>}
+            </div>}
           </div>
+          {messages.length>0&&showJump&&<button className="jump-latest" type="button" onClick={scrollToLatest}><ArrowDown size={14}/> Latest message</button>}
           <div className="composer-wrap"><div className="composer"><div className="composer-head"><div className="model-control">
                 <button className={`model-trigger ${modelOpen?'selected':''}`} onClick={()=>setModelOpen(v=>!v)} aria-expanded={modelOpen}><span className="model-orb"><Sparkles size={14}/></span><span className="model-verb">MODEL</span><strong>{models.find(m=>m.id===model)?.name||'Auto · Free router'}</strong><ChevronDown size={14}/></button>
                 {modelOpen&&<div className="model-popover"><input value={modelQuery} onChange={e=>setModelQuery(e.target.value)} placeholder="Search free models..." autoFocus/><div className="catalog-status"><span>{catalogLoading?'Refreshing…':catalogOnline?`${models.length-1} selectable free models`:'Catalogue unavailable · auto router only or cached models'}</span><button type="button" disabled={catalogLoading} onClick={()=>refreshModels(true)}>Refresh</button></div><div className="model-results">{filteredModels.slice(0,70).map(m=><button key={m.id} className={m.id===model?'current':''} onClick={()=>{setModel(m.id);setModelOpen(false);setModelQuery('')}}><span><strong>{m.name}</strong><small>{m.id}</small></span><span className="model-badges">FREE {m.tools?'· TOOLS':''}</span></button>)}{!filteredModels.length&&<span className="model-empty">No available matching models</span>}</div></div>}
@@ -315,7 +335,7 @@ export default function Home(){
           <div className="connection-list">{(['darglobal','wasalt'] as const).map(id=>{const s=sources.find(x=>x.id===id);return <div className="connection-card" key={id}><div className="conn-symbol"><Globe2 size={17}/></div><div className="conn-data"><strong>{sourceName(id)}</strong><small>{s?.documents??0} indexed documents</small><span className={s?.permitted&&!['access_restricted','unavailable','permission_required'].includes(s.last_run_status)?'conn-status indexed':'conn-status restricted'}>{s?.last_run_status==='access_restricted'?'CLOUDFLARE CHALLENGE':s?.last_run_status==='unavailable'?'UNAVAILABLE':s?.last_run_status==='permission_required'||!s?.permitted?'RESTRICTED / PENDING':'PERMITTED'}</span>{s?.last_run_status&&<small className="source-status-detail">{s.last_run_status.replaceAll('_',' ')}{s.permission_note?` · ${s.permission_note}`:''}</small>}</div><a target="_blank" rel="noopener noreferrer" href={id==='darglobal'?'https://darglobal.co.uk/':'https://wasalt.sa/'} aria-label={`Open ${id}`}><ArrowUpRight size={16}/></a></div>})}</div>
           <div className="evidence-divider"/>
           <div className="panel-heading">EVIDENCE LOG <span>{latestSources.length.toString().padStart(2,'0')}</span></div>
-          {latestSources.length? <div className="evidence-log">{latestSources.map((s,i)=><a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="evidence-item"><span className="evidence-id">{s.id}</span><span><strong>{s.title}</strong><small>{sourceName(s.source)} · source record</small><small>{s.excerpt}</small></span><ExternalLink size={13}/></a>)}</div>:<div className="empty-evidence"><div className="empty-radar"><span/><span/><span/><CircleDot size={19}/></div><strong>Awaiting first discovery</strong><p>Verified citations and source signals will appear here as you research.</p></div>}
+          {latestSources.length? <div className="evidence-log">{latestSources.map((s,i)=><a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="evidence-item"><span className="evidence-id">{s.id}</span><span><strong>{s.title}</strong><small>{sourceName(s.source)} · observed {s.fetched_at?.slice(0,10)||'unknown'}</small><small>{s.excerpt}</small></span><ExternalLink size={13}/></a>)}</div>:<div className="empty-evidence"><div className="empty-radar"><span/><span/><span/><CircleDot size={19}/></div><strong>Awaiting first discovery</strong><p>Verified citations and source signals will appear here as you research.</p></div>}
           <div className="panel-bottom"><LockKeyhole size={15}/><span>Evidence is retrieved from indexed records and authorized official pages. Unsupported claims are withheld.</span></div>
         </aside>}
       </div>

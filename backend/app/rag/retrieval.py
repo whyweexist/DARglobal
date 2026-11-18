@@ -91,48 +91,63 @@ def semantic_search(query: str, source_filter: list[str] | None = None, limit: i
             for r in nearest if r.rowid in byid][:limit]
 
 
-def structured_search(query: str, source_filter: list[str] | None = None, limit: int = 20) -> list[Evidence]:
-    """Prioritize source-verified property metadata; enforce explicit numerical constraints."""
-    tokens = significant_tokens(query)
-    if not tokens:
-        return []
-    sources = source_filter or ["darglobal", "wasalt"]
-    lower = query.casefold()
-    import re
-    bound = re.search(r"(?:under|below|less than|over|above|more than)\s*(?:[$£€]|sar|aed)?\s*([\d,]+)", lower)
-    bed = re.search(r"(\d+)\s*(?:bed|bedroom)", lower)
+def property_constraints(query: str) -> tuple[list[str],dict]:
+    """Explicit marketplace constraints, never an inferred price conversion."""
+    from app.rag.property_query import parse_market_query
+    f=parse_market_query(query); clauses=[]; params={}
+    if f['cities']:
+        cities={x.lower() for x in f['cities']}
+        if 'al khobar' in cities: cities.add('khobar')
+        clauses.append('lower(p.city) IN :cities'); params['cities']=list(cities)
+    if f['categories']:
+        clauses.append('('+' OR '.join(f'lower(p.property_type) LIKE :kind{i}' for i in range(len(f['categories'])))+')')
+        params.update({f'kind{i}':f'%{kind}%' for i,kind in enumerate(f['categories'])})
+        if 'villa' in f['categories']:
+            clauses[-1]=clauses[-1][:-1]+" OR lower(p.property_type)='house')"
+    if f['transaction']:
+        clauses.append('p.transaction_type = :transaction');params['transaction']=f['transaction']
+    if f['bedrooms'] is not None:
+        clauses.append('p.bedrooms = :beds');params['beds']=f['bedrooms']
+    for key,op in [('maximum','<'),('minimum','>')]:
+        if key in f:
+            clauses.append(f'p.price {op} :{key}');params[key]=f[key]
+    if ('maximum' in f or 'minimum' in f) and f['currency']:
+        clauses.append('p.currency = :currency');params['currency']=f['currency']
+    return clauses,params
+
+
+def constrained_urls(query: str, sources: list[str]) -> set[str] | None:
+    # Strict constraints apply to marketplace listing retrieval, not developer
+    # research questions. Enforce them on every Wasalt retrieval branch.
+    clauses,params=property_constraints(query)
+    if not clauses or 'wasalt' not in sources: return None
+    # City-only general research may cite a project or category page.
+    if set(params)=={'cities'}: return None
+    sql=text("SELECT p.url FROM properties p WHERE p.source_id = 'wasalt' AND "+' AND '.join(clauses))
+    if 'cities' in params: sql=sql.bindparams(__import__('sqlalchemy').bindparam('cities',expanding=True))
     with engine().connect() as conn:
-        properties = conn.execute(text("""SELECT p.source_id, p.url, p.title, p.city, p.country,
-              p.property_type, p.price, p.currency, p.bedrooms, p.bathrooms
-              FROM properties p WHERE p.source_id IN :sources LIMIT 300""").bindparams(
-              __import__('sqlalchemy').bindparam('sources', expanding=True)), {"sources": sources}).all()
-        ranked = []
-        for row in properties:
-            names = " ".join(str(v or "") for v in (row.title,row.city,row.country,row.property_type)).casefold()
-            matches = sum(t in names for t in tokens)
-            if not matches:
-                continue
-            if bed and row.bedrooms != int(bed.group(1)):
-                continue
-            if bound:
-                if row.price is None:
-                    continue
-                threshold = float(bound.group(1).replace(",", ""))
-                if ("under" in lower or "below" in lower or "less than" in lower) and row.price >= threshold:
-                    continue
-                if ("over" in lower or "above" in lower or "more than" in lower) and row.price <= threshold:
-                    continue
-            ranked.append((matches, row))
-        ranked.sort(key=lambda pair: pair[0], reverse=True)
-        results = []
-        for score, row in ranked[:limit]:
-            chunk = conn.execute(text("""SELECT c.id,c.text,c.heading,d.fetched_at
-                FROM chunks c JOIN documents d ON c.document_id=d.id
-                WHERE d.url=:url LIMIT 1"""), {"url": row.url}).first()
-            if chunk:
-                results.append(Evidence(chunk_id=chunk.id, title=row.title,source=row.source_id,
-                                        url=row.url, text=chunk.text, fetched_at=str(chunk.fetched_at),
-                                        score=score, heading=chunk.heading))
+        return set(conn.execute(sql,params).scalars())
+
+
+def structured_search(query: str, source_filter: list[str] | None = None, limit: int = 20) -> list[Evidence]:
+    tokens=significant_tokens(query)
+    if not tokens: return []
+    sources=source_filter or ['darglobal','wasalt']
+    clauses,params=property_constraints(query)
+    params['sources']=sources;params['limit']=max(limit*12,240)
+    stmt=text('SELECT p.source_id,p.url,p.title,p.city,p.country,p.property_type FROM properties p WHERE p.source_id IN :sources '+(' AND '+' AND '.join(clauses) if clauses else '')+' ORDER BY p.observed_at DESC LIMIT :limit').bindparams(__import__('sqlalchemy').bindparam('sources',expanding=True))
+    if 'cities' in params: stmt=stmt.bindparams(__import__('sqlalchemy').bindparam('cities',expanding=True))
+    with engine().connect() as conn:
+        ranked=[]
+        for row in conn.execute(stmt,params):
+            names=' '.join(str(v or '') for v in (row.title,row.city,row.country,row.property_type)).casefold()
+            overlap=sum(t.rstrip('s') in names for t in tokens)
+            if overlap or clauses: ranked.append((overlap,row))
+        ranked.sort(key=lambda x:x[0],reverse=True)
+        results=[]
+        for score,row in ranked[:limit]:
+            chunk=conn.execute(text('SELECT c.id,c.text,c.heading,d.fetched_at FROM chunks c JOIN documents d ON c.document_id=d.id WHERE d.url=:url ORDER BY c.ordinal LIMIT 1'),{'url':row.url}).first()
+            if chunk: results.append(Evidence(chunk.id,row.title,row.source_id,row.url,chunk.text,str(chunk.fetched_at),score,chunk.heading))
     return results
 
 
@@ -166,7 +181,10 @@ class HybridRetriever:
         ordered = sorted(merged.values(), key=lambda ev: scores[ev.chunk_id], reverse=True)
         # Require substantive word-level support and prefer specific pages over a
         # homepage that merely mentions the requested source or a generic keyword.
-        filtered = [ev for ev in ordered if self._plausible(query, ev)]
+        allowed = constrained_urls(query, sources or ['darglobal','wasalt'])
+        structured_ids = {e.chunk_id for branch,weight in results if weight==0.8 for e in branch}
+        filtered = [ev for ev in ordered if (self._plausible(query, ev) or (allowed is not None and ev.source == 'wasalt' and ev.url in allowed and ev.chunk_id in structured_ids))
+                    and (allowed is None or ev.source != 'wasalt' or ev.url in allowed)]
         terms = set(significant_tokens(query))
         def quality(ev):
             words = set(re.findall(r"\w+", (ev.text + " " + ev.title).casefold()))
@@ -179,10 +197,9 @@ class HybridRetriever:
         for ev in filtered:
             words = set(re.findall(r"\w+", ev.text.casefold()))
             duplicate = any(len(words & old) / max(1, min(len(words), len(old))) >= .80
-                            and not (ev.source == prior.source == "wasalt" and ev.url != prior.url
-                                     and "/property/" in ev.url and "/property/" in prior.url)
+                            and not (ev.source == prior.source == "wasalt" and ev.url != prior.url)
                             for prior, old in distinct)
-            if duplicate or url_counts.get(ev.url, 0) >= 2:
+            if duplicate or url_counts.get(ev.url, 0) >= 3:
                 continue
             distinct.append((ev, words))
             url_counts[ev.url] = url_counts.get(ev.url, 0) + 1

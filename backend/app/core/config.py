@@ -19,9 +19,23 @@ class Settings(BaseSettings):
     scrape_on_boot: bool = True
     scraper_engine: Literal["httpx", "scrapling"] = "httpx"
     scrape_refresh_hours: int = Field(default=24, ge=1)
-    crawl_max_pages: int = Field(default=15, ge=1, le=250)
+    crawl_max_pages: int = Field(default=50, ge=1, le=250)
     crawl_delay_seconds: float = Field(default=2, ge=0.5)
     darglobal_enabled: bool = True
+    wasalt_engine: Literal["inherit", "httpx", "scrapling", "apify"] = "inherit"
+    apify_enabled: bool = False
+    apify_token: str = ""
+    apify_live_search: bool = False
+    apify_max_listings: int = Field(default=40, ge=1, le=250)
+    apify_live_max_listings: int = Field(default=8, ge=1, le=30)
+    apify_max_runs_per_day: int = Field(default=4, ge=1, le=100)
+    apify_max_charge_usd: float = Field(default=0.25, gt=0, le=10)
+    apify_timeout_seconds: int = Field(default=90, ge=10, le=300)
+
+    @property
+    def effective_wasalt_engine(self) -> str:
+        return self.scraper_engine if self.wasalt_engine == "inherit" else self.wasalt_engine
+
     wasalt_details_per_category: int = Field(default=3, ge=1, le=20)
     wasalt_max_response_bytes: int = Field(default=5_000_000, ge=100_000, le=10_000_000)
     wasalt_max_category_pages: int = Field(default=3, ge=1, le=20)

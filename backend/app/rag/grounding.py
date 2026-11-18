@@ -14,7 +14,7 @@ def evidence_packet(evidence: list[Evidence]) -> list[dict]:
     for i, ev in enumerate(evidence, 1):
         if remaining < 120:
             break
-        excerpt = ev.text[:min(2100, remaining)]
+        excerpt = ev.text[:min(remaining, max(2100, settings().rag_max_context_chars // max(1,len(evidence))))]
         remaining -= len(excerpt)
         result.append({"id": f"E{i}", "source": ev.source, "title": ev.title,
                        "observed_at": ev.fetched_at, "text": excerpt})

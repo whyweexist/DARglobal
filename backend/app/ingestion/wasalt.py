@@ -18,7 +18,11 @@ log = logging.getLogger(__name__)
 async def scrape_wasalt(*, max_pages: int | None = None, dry_run: bool = False,
                         engine: str | None = None, query: str = '') -> CrawlReport:
     cfg = settings()
-    selected = require_engine(engine or cfg.scraper_engine)
+    selected = engine or cfg.effective_wasalt_engine
+    if selected == "apify":
+        from app.ingestion.apify_wasalt import scrape_apify
+        return await scrape_apify(max_pages=max_pages, dry_run=dry_run, query=query)
+    selected = require_engine(selected)
     report = CrawlReport(source='wasalt', engine=selected)
     limit = cfg.crawl_max_pages if max_pages is None else max_pages
     if not 1 <= limit <= 250:

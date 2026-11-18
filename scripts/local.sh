@@ -14,8 +14,8 @@ mode="${1:-up}"; if [ "$#" -gt 0 ]; then shift; fi
 # Existing virtual environments must not cause the installation to be skipped.
 extras=()
 want_scrapling=false
-if [ "${ENABLE_SCRAPLING:-}" = true ] || [ "${SCRAPER_ENGINE:-}" = scrapling ] || \
-   grep -Eq "^[[:space:]]*(SCRAPER_ENGINE[[:space:]]*=[[:space:]]*['\"]?scrapling['\"]?|ENABLE_SCRAPLING[[:space:]]*=[[:space:]]*['\"]?true['\"]?)[[:space:]]*(#.*)?$" .env; then
+if [ "${ENABLE_SCRAPLING:-}" = true ] || [ "${SCRAPER_ENGINE:-}" = scrapling ] || [ "${WASALT_ENGINE:-}" = scrapling ] || \
+   grep -Eq "^[[:space:]]*((SCRAPER_ENGINE|WASALT_ENGINE)[[:space:]]*=[[:space:]]*['\"]?scrapling['\"]?|ENABLE_SCRAPLING[[:space:]]*=[[:space:]]*['\"]?true['\"]?)[[:space:]]*(#.*)?$" .env; then
   want_scrapling=true
 fi
 previous=""

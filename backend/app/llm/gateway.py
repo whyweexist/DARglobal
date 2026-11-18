@@ -17,6 +17,7 @@ Answer exclusively from the current evidence. Preserve exact property names, fig
 Each factual sentence must have an evidence citation [E1] etc. Do not invent citations or links.
 If the requested information is absent, output exactly INSUFFICIENT_EVIDENCE (no citation required).
 For comparisons, cite each entity separately. Avoid implying past observations are live availability.
+For Wasalt, attribute Source: Wasalt.sa, distinguish recorded asking prices from current availability, preserve the rental period, and direct users to the cited live listing to verify. Disclose quality flags and missing descriptions.
 Output plain text or simple Markdown with inline citations. Do not include unsupported numerical claims.
 """
 

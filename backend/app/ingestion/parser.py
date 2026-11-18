@@ -42,18 +42,22 @@ def parse_html(html: str, source: str, *, url: str = "") -> ExtractedPage:
             current.clear()
 
     # Restrict to meaningful text blocks to avoid repeated layout elements.
-    for node in root.find_all(["h1", "h2", "h3", "h4", "p", "li", "td", "dd"], recursive=True):
+    for node in root.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "td", "dt", "dd", "div", "span"], recursive=True):
         if node.find_parent(["nav", "footer", "aside", "form"]):
             continue
-        if node.name in ("h1", "h2", "h3", "h4"):
+        if node.name in ("h1", "h2", "h3", "h4", "h5", "h6"):
             flush()
             current_heading = node.get_text(" ", strip=True)[:250] or title
         else:
-            if node.find_parent(["li", "p", "td", "dd"]):
+            if node.find_parent(["li", "p", "td", "dd", "dt"]):
+                continue
+            # Leaf-only text blocks retain visible specification cards without
+            # duplicating nested layout, navigation or entire page containers.
+            if node.name in ('div','span') and (node.find(['div','span','p','li','h1','h2','h3','h4','h5','h6','table','dd','dt']) or node.find_parent(['a','button'])):
                 continue
             text = node.get_text(" ", strip=True)
             normalized = re.sub(r"\s+", " ", text).strip()
-            if 12 <= len(normalized) <= 2500 and normalized.casefold() not in seen_blocks:
+            if (len(normalized) >= 12 or (node.name in ("dt","dd","td","div","span") and len(normalized)>=2)) and len(normalized)<=12000 and normalized.casefold() not in seen_blocks:
                 current.append(normalized)
                 seen_blocks.add(normalized.casefold())
     flush()

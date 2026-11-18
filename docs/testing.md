@@ -58,3 +58,7 @@ uv run --no-project --with playwright python scripts/check_responsive.py --url h
 ```
 
 This checks the actual browser app at 320, 390, 768, 1024, 1440 pixel widths and a landscape mobile viewport. It checks document overflow, composer visibility, the model catalogue and small-screen drawer controls. It needs no LLM request. Browser installation requires network access. The archive was checked with 44 offline backend tests and 27 structural Chromium layout checks using HTML generated from the updated TSX component; full Next.js execution, real Wasalt downloads and external inference were not available in the build environment.
+
+## Apify and chat scroll regressions
+
+`cd backend && uv run --extra dev pytest -q tests/test_apify_wasalt.py` tests the documented actor HTTP contract, source allowlist, cost settings, daily reservation, dry-run, live-search opt-in, privacy, database persistence and structured retrieval. It uses test-only mocked responses and never spends Apify credits. After starting the UI, run `python scripts/check_chat_scroll.py` from an environment with Playwright and Chromium installed; it injects a browser-only SSE fixture to verify long chat responses, the scroll pane, Latest message control, and mobile composer. For actual authorized Apify integration, follow `docs/apify.md` and use a bounded operator-approved run.

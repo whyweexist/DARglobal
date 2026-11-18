@@ -32,3 +32,7 @@ SSE events: `activity` (actual phase), `delta` (verified response fragments), `d
 ## Evaluation
 
 `make eval` uses a file `evaluations/retrieval/queries.jsonl` in which each line specifies `question` and `relevant_urls` for **actual sourced records**. It refuses to invent evaluation questions/labels if no such dataset exists. Target metrics: Recall@5 and citations/abstention accuracy. Cross-encoder and embedding model changes require benchmark comparison. The repository contains no fabricated benchmark report.
+
+### Listing-depth upgrade
+
+Provider records are normalized into separate factual, amenity/status and description sections. Every chunk carries the listing/project title. Structured marketplace constraints are applied to Wasalt results after hybrid fusion, as well as within SQL, so vector similarity cannot override explicit price or bedroom requirements. The optional Apify live tool uses the same normalized schema as periodic ingestion; see [Apify integration](apify.md). Existing data is not deleted; refreshing the source regenerates changed chunk material. Missing provider fields remain unknown.
