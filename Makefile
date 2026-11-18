@@ -62,9 +62,9 @@ local-ingest:
 local-index:
 	bash scripts/local.sh cli index
 local-scrape-darglobal:
-	bash scripts/local.sh scrape-darglobal
+	bash scripts/local.sh scrape-darglobal $(ARGS)
 local-scrape-wasalt:
-	bash scripts/local.sh scrape-wasalt
+	bash scripts/local.sh scrape-wasalt $(ARGS)
 local-doctor:
 	bash scripts/local.sh cli doctor
 chat:

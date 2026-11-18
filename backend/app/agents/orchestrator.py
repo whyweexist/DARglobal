@@ -20,6 +20,10 @@ class RAGOrchestrator:
                      on_status=None, history: list[dict] | None = None) -> dict:
         cfg = settings()
         plan = plan_query(question, history)
+        # Respect an explicitly named source if it is enabled by the UI.
+        named = [source for source in sources if source in plan.search_query.casefold()]
+        if len(named) == 1 and not any(term in plan.search_query.casefold() for term in ('compare','both sources','across sources','مقارنة')):
+            sources = named
         activities = []
         degraded = []
         discovered = False

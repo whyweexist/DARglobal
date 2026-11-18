@@ -83,7 +83,7 @@ class SourcePolicy:
 
 
 async def permitted_request(client: httpx.AsyncClient, policy: SourcePolicy, url: str, source: str,
-                            size_limit: int = 1_500_000) -> str:
+                            size_limit: int = 1_500_000) -> tuple[str, str]:
     # Every same-source redirect must pass the same URL/robots checks; no cross-origin bypass.
     current = url
     for _ in range(4):
@@ -102,5 +102,5 @@ async def permitted_request(client: httpx.AsyncClient, policy: SourcePolicy, url
                 result.extend(chunk)
                 if len(result) > size_limit:
                     raise ValueError("Document exceeds allowed response size")
-            return result.decode(response.encoding or "utf-8", errors="replace")
+            return current, result.decode(response.encoding or "utf-8", errors="replace")
     raise PolicyDenied("Too many redirects or redirect loop")

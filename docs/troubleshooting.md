@@ -59,3 +59,24 @@ needs to be fixed or the build retried; do not switch back to CUDA PyPI wheels.
 
 For a local project-mode install, `backend/pyproject.toml` contains the CPU index
 selection. Existing virtual environments with CUDA torch may need recreation.
+
+## No evidence / authorized pages processed: 0
+
+This means retrieval did not have sufficient evidence. OpenRouter may not have been called. The catalogue-aware release prioritizes the official DarGlobal `/projects` page, uses visible project-card labels to find links such as `/dg1`, and reports per-page access or extraction failures. It does not bypass robots or access controls. Check the CLI report and the browser research activity. Before a refresh, stop the previous native runner to avoid simultaneous ingestion. Preserve `data/estate.db` or the Docker volume; no reset is needed.
+
+```sh
+make local-doctor
+make local-scrape-darglobal ARGS="--engine httpx --max-pages 40"
+make local-index
+make export
+make search Q="DG1 Dubai amenities"
+make local-check-ai
+make chat ARGS='--source darglobal --question "What amenities does DG1 in Dubai offer?"'
+```
+
+For Docker run `docker compose run --rm --no-deps api python /app/scripts/scrape_darglobal.py --engine httpx --max-pages 40`, then `make index` and `make check-ai`. The HTTPX option is a diagnostic comparison, not a way to bypass source restrictions. The official catalogue may still be blocked or unavailable. Inspect the `failures` list in the scraper report, rather than assuming that fetched pages were indexed. Native and Docker databases are separate. The project has no preloaded listing data. Wasalt requires documented authorization. Live scraping and real model inference require verification in the deployment environment.
+
+
+## Wasalt reports zero documents
+
+Ensure `WASALT_AUTHORIZED=true` and a nonempty **actual** authorization reference in `.env`. Recreate the Docker services if changing container environment variables, or restart native execution. Run `make local-scrape-wasalt ARGS="--engine httpx --max-pages 40"` (native) to inspect the real report. `permission_required` means the authorization/robots gate rejected collection; `HTTP 403` or `429` means the source refused or limited requests; `No listing-specific evidence extracted` means the page lacked the expected visible listing content. Do not bypass these controls. Confirm indexed records using `make stats`, `make export`, and `make search Q="Wasalt apartments for sale in Riyadh"`. If needed, obtain an approved source feed or authorized export from the provider. Successful offline tests do not prove that Wasalt is accessible from your Codespace.

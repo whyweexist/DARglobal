@@ -46,3 +46,15 @@ requested-field gating, numeric citation checks, conversation isolation and
 continuation, explicit provider failures, and local data exports. No test fixture
 is seeded into the runtime database. `make local-check-ai` is intentionally a
 separate live check requiring a real OpenRouter key and network access.
+
+
+## Responsive browser smoke test
+
+On a running local or Codespaces application, run:
+
+```bash
+uv run --no-project --with playwright playwright install chromium
+uv run --no-project --with playwright python scripts/check_responsive.py --url http://localhost:3000
+```
+
+This checks the actual browser app at 320, 390, 768, 1024, 1440 pixel widths and a landscape mobile viewport. It checks document overflow, composer visibility, the model catalogue and small-screen drawer controls. It needs no LLM request. Browser installation requires network access. The archive was checked with 44 offline backend tests and 27 structural Chromium layout checks using HTML generated from the updated TSX component; full Next.js execution, real Wasalt downloads and external inference were not available in the build environment.

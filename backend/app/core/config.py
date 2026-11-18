@@ -22,7 +22,10 @@ class Settings(BaseSettings):
     crawl_max_pages: int = Field(default=15, ge=1, le=250)
     crawl_delay_seconds: float = Field(default=2, ge=0.5)
     darglobal_enabled: bool = True
-    wasalt_authorized: bool = False
+    wasalt_details_per_category: int = Field(default=3, ge=1, le=20)
+    wasalt_max_response_bytes: int = Field(default=5_000_000, ge=100_000, le=10_000_000)
+    wasalt_max_category_pages: int = Field(default=3, ge=1, le=20)
+    wasalt_authorized: bool = True
     wasalt_authorization_reference: str = ""
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = Field(default=384, ge=16)
@@ -33,7 +36,7 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=6, ge=1, le=20)
     rag_live_search: bool = True
     agent_max_live_pages: int = Field(default=3, ge=0, le=15)
-    agent_max_seconds: int = Field(default=22, ge=2, le=120)
+    agent_max_seconds: int = Field(default=45, ge=2, le=120)
     chat_deadline_seconds: int = Field(default=100, ge=15, le=240)
     llm_max_tokens: int = Field(default=1200, ge=100, le=4000)
     llm_timeout_seconds: int = Field(default=40, ge=5)

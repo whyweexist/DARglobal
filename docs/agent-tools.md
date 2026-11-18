@@ -33,3 +33,6 @@ On-demand official sitemap discovery uses the configured `SCRAPER_ENGINE`
 for eligible HTML page fetching and link extraction. It continues enforcing
 robots/authorization and bounded tool limits; choosing Scrapling does not
 permit bypassing site controls. See [Scrapling](scrapling.md).
+
+
+Wasalt live discovery uses question-targeted public category URLs and their listing/project card links. The orchestrator narrows an explicitly source-named question to that enabled source unless the question requests a comparison. Cross-source searches reserve a bounded share of page attempts for the other enabled source. Access refusal and the existing authorization/robots checks remain authoritative.

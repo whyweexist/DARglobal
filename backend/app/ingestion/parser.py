@@ -18,7 +18,10 @@ class ExtractedPage:
         return "\n\n".join((f"{heading}\n{body}" if heading else body) for heading, body in self.sections)
 
 
-def parse_html(html: str, source: str) -> ExtractedPage:
+def parse_html(html: str, source: str, *, url: str = "") -> ExtractedPage:
+    if source == "wasalt" and url:
+        from app.ingestion.wasalt_parser import parse_wasalt
+        return parse_wasalt(html, url)
     properties = jsonld_properties(html)
     soup = BeautifulSoup(html, "lxml")
     for unwanted in soup.select("script, style, nav, footer, header, aside, form, svg, noscript, iframe, button, [role=navigation]"):
@@ -34,7 +37,7 @@ def parse_html(html: str, source: str) -> ExtractedPage:
     def flush():
         if current:
             value = "\n\n".join(current).strip()
-            if len(value) >= 45 and value not in (s[1] for s in sections):
+            if len(value) >= 12 and value not in (s[1] for s in sections):
                 sections.append((current_heading, value))
             current.clear()
 
@@ -54,6 +57,16 @@ def parse_html(html: str, source: str) -> ExtractedPage:
                 current.append(normalized)
                 seen_blocks.add(normalized.casefold())
     flush()
+    # Catalogue project cards may be div/span-only anchor content and are
+    # otherwise lost by paragraph-based extraction. Read actual visible labels.
+    if source == "darglobal" and url:
+        from urllib.parse import urlparse
+        if urlparse(url).path.startswith('/projects'):
+            from app.ingestion.crawler import catalog_links
+            labels = list(dict.fromkeys(label for label in catalog_links(html, url, source).values()
+                                        if len(label.split()) >= 3))
+            if labels:
+                sections.insert(0, ("Official project catalogue", "\n\n".join(labels)))
     facts = {"properties": properties[:15]} if properties else {}
     return ExtractedPage(title=title or "Untitled page", sections=sections, language=lang, facts=facts)
 

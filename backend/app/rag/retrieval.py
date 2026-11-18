@@ -179,7 +179,9 @@ class HybridRetriever:
         for ev in filtered:
             words = set(re.findall(r"\w+", ev.text.casefold()))
             duplicate = any(len(words & old) / max(1, min(len(words), len(old))) >= .80
-                            for _, old in distinct)
+                            and not (ev.source == prior.source == "wasalt" and ev.url != prior.url
+                                     and "/property/" in ev.url and "/property/" in prior.url)
+                            for prior, old in distinct)
             if duplicate or url_counts.get(ev.url, 0) >= 2:
                 continue
             distinct.append((ev, words))

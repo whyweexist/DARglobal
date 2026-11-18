@@ -10,8 +10,10 @@ import httpx
 from app.core.config import settings
 from app.ingestion.policy import SourcePolicy, PolicyDenied, USER_AGENT, validate_official_url
 from app.ingestion.parser import parse_html
+from bs4 import BeautifulSoup
 from app.ingestion.fetchers import fetch_allowed_page, require_engine, scrapling_available
 from app.rag.indexer import upsert_page
+from app.ingestion import wasalt_site
 
 log = logging.getLogger(__name__)
 
@@ -28,9 +30,12 @@ class CrawlReport:
     errors: int = 0
     detail: str = ""
     urls: list[str] = field(default_factory=list)
+    failures: list[dict] = field(default_factory=list)
 
 
 def eligible_link(source: str, url: str) -> bool:
+    if source == "wasalt":
+        return wasalt_site.canonical_url(url) is not None
     p = urlparse(url)
     path = p.path.lower()
     if not path or path == "/":
@@ -39,10 +44,39 @@ def eligible_link(source: str, url: str) -> bool:
         return False
     if any(x in path for x in ("/login", "/signup", "/account", "/privacy", "/terms", "/contact", "/cookies")):
         return False
-    # Different site-specific ranking/routing; Wasalt only authorized listing/project paths.
-    if source == "wasalt":
-        return any(x in path for x in ("/property", "/properties", "/listing", "/projects", "/project", "/real-estate", "/en/"))
     return True
+
+
+DARGLOBAL_CATALOG = "https://darglobal.co.uk/projects"
+
+
+def catalog_links(html: str, base: str, source: str) -> dict[str, str]:
+    """Use visible official anchor labels, not just slugs (e.g. /dg1)."""
+    if source == "wasalt":
+        return wasalt_site.listing_links(html, base)
+    links = {}
+    allowed = {"darglobal": {"darglobal.co.uk", "www.darglobal.co.uk"},
+               "wasalt": {"wasalt.sa", "www.wasalt.sa"}}[source]
+    soup = BeautifulSoup(html, "lxml")
+    for a in soup.select("a[href]")[:500]:
+        label = a.get_text(" ", strip=True)
+        u = urldefrag(urljoin(base, str(a['href'])))[0].split('?')[0]
+        parts = urlparse(u)
+        if parts.scheme != 'https' or parts.hostname not in allowed or not eligible_link(source, u):
+            continue
+        if label and parts.path not in ('', '/', '/projects'):
+            links[u] = (links.get(u, '') + ' ' + label).strip()[:600]
+    return links
+
+
+def failure_reason(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "HTTP request timed out"
+    if isinstance(exc, (PolicyDenied, ValueError, RuntimeError)):
+        return str(exc)[:250]
+    return type(exc).__name__
 
 
 async def discover_sitemap(client: httpx.AsyncClient, policy: SourcePolicy, url: str, source: str,
@@ -103,7 +137,7 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
         policy = SourcePolicy(client)
         seeds = await discover_sitemap(client, policy, base_url.rstrip("/") + "/sitemap.xml", source, limit * 3)
         # No sitemap access means crawl only from the official, permitted homepage.
-        candidates = deque([base_url] + seeds)
+        candidates = deque(([DARGLOBAL_CATALOG, base_url] if source == "darglobal" else [base_url]) + seeds)
         seen = set()
         while candidates and report.fetched < limit and len(seen) < limit * 8:
             current = candidates.popleft()
@@ -123,12 +157,18 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
                 fetched = await fetch_allowed_page(client, policy, current, source, engine=selected_engine)
                 report.fetched += 1
                 report.urls.append(current)
-                parsed = parse_html(fetched.html, source)
+                parsed = parse_html(fetched.html, source, url=fetched.url)
                 if parsed.sections:
                     outcome = upsert_page(source, fetched.url, parsed, method=f"authorized_{selected_engine}_crawl")
                     setattr(report, outcome, getattr(report, outcome) + 1)
                 else:
                     report.skipped += 1
+                if source == 'darglobal' and urlparse(current).path.rstrip('/') == '/projects':
+                    # Product card links are more useful than arbitrary sitemap order.
+                    project_urls = catalog_links(fetched.html, fetched.url, source)
+                    for href, label in reversed(list(project_urls.items())):
+                        if len(label.split()) >= 3 and href not in seen:
+                            candidates.appendleft(href)
                 if len(candidates) < limit * 5:
                     for link in fetched.links:
                         href = urldefrag(urljoin(fetched.url, link))[0]
@@ -141,12 +181,16 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
                 await asyncio.sleep(config.crawl_delay_seconds)
             except PolicyDenied as exc:
                 report.skipped += 1
+                report.failures.append({"url": current, "reason": failure_reason(exc)})
                 if report.fetched == 0 and "robots.txt" in str(exc):
                     report.status, report.detail = "permission_required", str(exc)
                     break
             except (httpx.HTTPError, ValueError, RuntimeError) as exc:
                 report.errors += 1
+                report.failures.append({"url": current, "reason": failure_reason(exc)})
                 log.warning("crawl error: source=%s url=%s type=%s", source, current, type(exc).__name__)
         if report.errors and report.status == "complete":
-            report.status = "partial"
+            report.status = "partial" if report.fetched else "unavailable"
+        if report.failures and not report.detail:
+            report.detail = "; ".join(f["reason"] for f in report.failures[:3])
     return report

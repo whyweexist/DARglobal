@@ -1,30 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-
-# Ensure uv is installed
-if ! command -v uv >/dev/null 2>&1; then
-    echo "uv not found. Installing uv..."
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "Error: curl is required to install uv." >&2
-        exit 1
-    fi
-
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-
-    # Load uv into the current shell
-    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-
-    if ! command -v uv >/dev/null 2>&1; then
-        echo "Error: uv installation failed or uv is not in PATH." >&2
-        echo "Install manually: https://docs.astral.sh/uv/getting-started/installation/" >&2
-        exit 1
-    fi
-fi
-echo "Using uv: $(uv --version)" || cp .env.example .env
+command -v uv >/dev/null || { echo 'Install uv: https://docs.astral.sh/uv/getting-started/installation/' >&2; exit 1; }
+[ -f .env ] || cp .env.example .env
 mkdir -p "$ROOT/data" "$ROOT/data/exports" "$ROOT/data/backups"
 # Native data storage is explicit and is deliberately separate from Docker's volume.
 export DATABASE_URL="sqlite:///$ROOT/data/estate.db"

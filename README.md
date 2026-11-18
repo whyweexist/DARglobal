@@ -41,6 +41,52 @@ The frontend uses a custom deep-forest editorial theme with an architectural res
 
 **Codespaces previews are not guaranteed to remain live after a Codespace stops.** See [deployment](docs/deployment.md) for persistent public hosting.
 
+## Authorized Wasalt collection (updated adapter)
+
+The Wasalt integration now targets its public property/category and project pages, rather than treating Wasalt like a generic corporate website. Configure the existing `.env` (do not overwrite your API key) after obtaining permission covering collection and your intended chatbot use:
+
+```dotenv
+WASALT_AUTHORIZED=true
+WASALT_AUTHORIZATION_REFERENCE="Your actual authorization reference from the assessment provider"
+SCRAPER_ENGINE=httpx
+WASALT_DETAILS_PER_CATEGORY=3
+WASALT_MAX_CATEGORY_PAGES=3
+WASALT_MAX_RESPONSE_BYTES=5000000
+```
+
+Use your actual reference, not the example text above. Permission is an operator attestation; the crawler still respects robots.txt and stops on access refusals. HTTPX is the recommended first diagnostic engine; select Scrapling if its optional extra is installed.
+
+Native verification (from repository root, existing services can be stopped while updating):
+
+```bash
+make local-scrape-wasalt ARGS="--engine httpx --max-pages 40"
+make local-index
+make stats
+make export
+make search Q="Wasalt apartments for sale in Riyadh"
+make local
+```
+
+To focus the standalone scraper on a location or transaction:
+
+```bash
+make local-scrape-wasalt ARGS="--engine httpx --max-pages 20 --query 'apartments for rent in Jeddah'"
+```
+
+Docker equivalent:
+
+```bash
+make up
+docker compose exec api python /app/scripts/scrape_wasalt.py --engine httpx --max-pages 40
+make index
+```
+
+Existing SQLite databases remain compatible. There is no schema migration or database reset required. Keep your existing `.env` and `data/` directory (or Docker volume) when copying these source files. An empty/blocked report is not a successful collection. Inspect `failures` and `make stats`; the worker can continue pending vector indexing. See [Wasalt adapter details](docs/data-sources.md#wasalt) for scope and limitations.
+
+## Responsive research interface
+
+The architectural editorial theme is preserved. The conversation scrolls independently of the composer; on screens up to 1240px the source-evidence panel opens as a dismissible right drawer, and up to 900px the workspace navigation becomes a left drawer. Both have close buttons, Escape dismissal and keyboard focus containment. The model catalogue, source filters, citations and chat input remain available on mobile. To check a running UI using a real browser, follow [the browser smoke test](docs/testing.md#responsive-browser-smoke-test).
+
 ## Run without Docker — Codespaces or local Linux
 
 Prerequisites: Python 3.12/3.13, `uv`, Node.js 22, pnpm 9, Bash, Make and curl. Codespaces already configures these. Native runs do not need a Docker daemon.
@@ -244,3 +290,7 @@ The backend Dockerfile deliberately creates `/app/evaluations/retrieval` rather 
 ## Licensing and data rights
 
 Application source code is offered under the MIT license. Rights to source-site content remain with its owners. Before deployment, review the source websites' current terms and secure required authorizations. This repository does not redistribute property listing content.
+
+### Diagnose missing evidence
+
+If chat returns `no_evidence`, run `make local-doctor`, `make local-scrape-darglobal ARGS="--engine httpx --max-pages 40"`, `make local-index`, `make search Q="DG1 Dubai amenities"`, and `make local-check-ai`. The scraper now prioritizes the official project catalogue and the live tool uses visible project-card labels to discover relevant pages. Inspect per-page `failures` and research activity for precise access/HTTP/extraction errors. No source restrictions are bypassed. See `docs/troubleshooting.md`.

@@ -27,6 +27,8 @@ app/ingestion/parser.py
 app/ingestion/policy.py
 app/ingestion/properties.py
 app/ingestion/wasalt.py
+app/ingestion/wasalt_parser.py
+app/ingestion/wasalt_site.py
 app/llm/__init__.py
 app/llm/gateway.py
 app/llm/registry.py
@@ -49,3 +51,5 @@ tests/test_docker_context.py
 tests/test_pipeline.py
 tests/test_scrapling_option.py
 tests/test_security.py
+tests/test_source_discovery.py
+tests/test_wasalt_adapter.py

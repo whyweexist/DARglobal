@@ -1,13 +1,15 @@
 """Transactional document upserts and incremental vector materialization."""
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from sqlalchemy import delete, text, select
 from app.core.config import settings
-from app.db.models import Chunk, Document
+from app.db.models import Chunk, Document, Property
 from app.db.session import session_factory, vector_loaded
 from app.ingestion.parser import ExtractedPage
 from app.rag.chunker import StructureAwareChunker
+from app.ingestion.properties import save_structured
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +18,8 @@ def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "autho
     if not page.sections:
         return "skipped"
     content = page.text
-    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    hash_material = content + "\n" + json.dumps(page.facts, sort_keys=True, ensure_ascii=False) if source == "wasalt" else content
+    digest = hashlib.sha256(hash_material.encode("utf-8")).hexdigest()
     cfg = settings()
     builder = StructureAwareChunker(target=cfg.chunk_target_tokens, maximum=cfg.chunk_max_tokens, overlap=cfg.chunk_overlap_tokens)
     chunks = builder.chunk(page.sections)
@@ -27,6 +30,8 @@ def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "autho
         doc = db.scalars(select(Document).where(Document.url == url)).first()
         if doc and doc.content_hash == digest:
             doc.fetched_at = datetime.now(timezone.utc)
+            if page.facts.get("properties"):
+                save_structured(source, url, page.facts["properties"], session=db)
             db.commit()
             return "skipped"
         outcome = "updated" if doc else "inserted"
@@ -48,10 +53,11 @@ def upsert_page(source: str, url: str, page: ExtractedPage, method: str = "autho
         for idx, c in enumerate(chunks):
             db.add(Chunk(document_id=doc.id, ordinal=idx, heading=c.heading,
                          text=c.text, tokens=c.tokens, checksum=c.checksum))
+        if page.facts.get("properties"):
+            save_structured(source, url, page.facts["properties"], session=db)
+        elif source == "wasalt" and method.endswith("crawl"):
+            db.execute(delete(Property).where(Property.source_id == source, Property.url == url))
         db.commit()
-    if page.facts.get("properties"):
-        from app.ingestion.properties import save_structured
-        save_structured(source, url, page.facts["properties"])
     return outcome
 
 

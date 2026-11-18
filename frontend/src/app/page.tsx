@@ -10,7 +10,7 @@ const SUGGESTIONS = [
   { icon: Building2, title: 'Development portfolio', query: 'What developments are documented for DarGlobal in Dubai?', label: 'RESEARCH' },
   { icon: MapPin, title: 'Explore by region', query: 'Which DarGlobal developments are documented in Oman?', label: 'GEOGRAPHY' },
   { icon: Layers3, title: 'Cross-source analysis', query: 'What verifiable information connects DarGlobal and Wasalt?', label: 'DISCOVERY' },
-  { icon: Search, title: 'Current source evidence', query: 'What is the latest verified information available about DarGlobal properties?', label: 'LIVE LOOKUP' },
+  { icon: Search, title: 'Saudi property listings', query: 'Show apartments for sale in Riyadh on Wasalt.', label: 'MARKETPLACE' },
 ];
 const sourceName = (s: string) => s === 'darglobal' ? 'DarGlobal' : 'Wasalt';
 const uid = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
@@ -66,6 +66,13 @@ export default function Home(){
   const [activity,setActivity]=useState<string>('');
   const [rightOpen,setRightOpen]=useState(true);
   const [mobileMenu,setMobileMenu]=useState(false);
+  const [evidenceDrawer,setEvidenceDrawer]=useState(false);
+  const [compactEvidence,setCompactEvidence]=useState(false);
+  const [compactMenu,setCompactMenu]=useState(false);
+  const menuButtonRef=useRef<HTMLButtonElement>(null);
+  const evidenceButtonRef=useRef<HTMLButtonElement>(null);
+  const menuCloseRef=useRef<HTMLButtonElement>(null);
+  const evidenceCloseRef=useRef<HTMLButtonElement>(null);
   const [liveSearch,setLiveSearch]=useState(true);
   const [online,setOnline]=useState<boolean|null>(null);
   const [aiReady,setAiReady]=useState(false);
@@ -80,6 +87,36 @@ export default function Home(){
   const bottomRef=useRef<HTMLDivElement>(null);
   const abortRef=useRef<AbortController|null>(null);
 
+  useEffect(()=>{
+    const menu=window.matchMedia('(max-width: 900px)');
+    const evidence=window.matchMedia('(max-width: 1240px)');
+    const sync=()=>{setCompactMenu(menu.matches);setCompactEvidence(evidence.matches);
+      if(!menu.matches)setMobileMenu(false);if(!evidence.matches)setEvidenceDrawer(false);};
+    sync();menu.addEventListener('change',sync);evidence.addEventListener('change',sync);
+    return()=>{menu.removeEventListener('change',sync);evidence.removeEventListener('change',sync)};
+  },[]);
+  const closeMenu=()=>{setMobileMenu(false);requestAnimationFrame(()=>menuButtonRef.current?.focus())};
+  const closeEvidence=()=>{setEvidenceDrawer(false);requestAnimationFrame(()=>evidenceButtonRef.current?.focus())};
+  useEffect(()=>{
+    if(mobileMenu)menuCloseRef.current?.focus();
+    if(evidenceDrawer)evidenceCloseRef.current?.focus();
+    const key=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){
+        if(evidenceDrawer){setEvidenceDrawer(false);requestAnimationFrame(()=>evidenceButtonRef.current?.focus())}
+        else if(mobileMenu){setMobileMenu(false);requestAnimationFrame(()=>menuButtonRef.current?.focus())}
+        else setModelOpen(false);
+      }
+      // Keep focus inside the open modal drawer when tabbing.
+      if(event.key==='Tab'&&(mobileMenu||evidenceDrawer)){
+        const node=document.getElementById(mobileMenu?'source-navigation':'evidence-drawer');
+        const focusable=Array.from(node?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),[tabindex="0"]')||[]).filter(el=>el.getClientRects().length>0);
+        if(!focusable.length)return;
+        const first=focusable[0],last=focusable[focusable.length-1];
+        if(event.shiftKey&&(document.activeElement===first||!node?.contains(document.activeElement))){event.preventDefault();last.focus()}
+        else if(!event.shiftKey&&(document.activeElement===last||!node?.contains(document.activeElement))){event.preventDefault();first.focus()}
+      }
+    };window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);
+  },[mobileMenu,evidenceDrawer]);
   useEffect(()=>{
     try {const raw=localStorage.getItem('estate:history');if(raw)setHistory(JSON.parse(raw));}
     catch {setHistory([]);}
@@ -149,7 +186,7 @@ export default function Home(){
               return next;
             });
           }
-          setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:accumulated,citations:result.sources||[],
+          setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:result.answer||accumulated,citations:result.sources||[],
             status:result.status,model:result.model_used||undefined,activity:result.tool_activity||[],reason:result.reason,fallback:result.fallback_used,query:result.retrieval_query,loading:false}:m));
         }
         if(event==='error')throw new Error(p.message||'Request failed');
@@ -166,7 +203,7 @@ export default function Home(){
       void fetch('/api/v1/sources',{cache:'no-store'}).then(r=>r.json()).then(d=>{if(Array.isArray(d.sources))setSources(d.sources)}).catch(()=>{});}}
   },[busy,conv,input,liveSearch,model,sourceFilter]);
 
-  const reset=()=>{threadVersion.current++;abortRef.current?.abort();abortRef.current=null;setBusy(false);setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);};
+  const reset=()=>{threadVersion.current++;abortRef.current?.abort();abortRef.current=null;setBusy(false);setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);setEvidenceDrawer(false);setModelOpen(false);};
   const openThread=async(thread:{id:string;token:string;title:string;updatedAt:number})=>{
     if(busy)return;
     const version=++threadVersion.current;
@@ -187,22 +224,25 @@ export default function Home(){
   };
   const toggleSource=(s:string)=>setSourceFilter(prev=>prev.includes(s)?(prev.length>1?prev.filter(x=>x!==s):prev):[...prev,s]);
   const docCount=sources.reduce((a,s)=>a+s.documents,0);
+  const activeCount=sources.filter(s=>s.permitted&&s.documents>0).length;
+  const showEvidence=compactEvidence?evidenceDrawer:rightOpen;
   const citations=messages.filter(x=>x.role==='assistant').at(-1)?.citations||[];
   const latestSources=Array.from(new Map<string, import('@/lib/types').Citation>(citations.map(x=>[x.url,x] as [string,import('@/lib/types').Citation])).values()).slice(-7).reverse();
   const filteredModels=models.filter(m=>m.name.toLowerCase().includes(modelQuery.toLowerCase())||m.id.toLowerCase().includes(modelQuery.toLowerCase()));
   const copy=(text:string)=>navigator.clipboard.writeText(text).then(()=>setToast('Copied to clipboard')).catch(()=>setToast('Clipboard unavailable'));
 
   return <div className="shell">
-    <aside className={`sidebar ${mobileMenu?'show':''}`}>
+    {(mobileMenu||evidenceDrawer)&&<button type="button" className="drawer-backdrop" aria-label="Close research panel" onClick={()=>mobileMenu?closeMenu():closeEvidence()}/>}
+    {(!compactMenu||mobileMenu)&&<aside id="source-navigation" className={`sidebar ${mobileMenu?'show':''}`} role={compactMenu?'dialog':undefined} aria-modal={compactMenu?true:undefined} aria-label="Research sources and history">
       <div className="brand-row"><div className="brand-mark"><Compass size={22} strokeWidth={1.6}/><span className="brand-mark-point"/></div>
         <div><div className="brand-top">ESTATE<span className="brand-dot">.</span></div><div className="brand-bottom">INTELLIGENCE</div></div>
-        <button className="mobile-close" onClick={()=>setMobileMenu(false)} aria-label="Close menu"><X size={20}/></button>
+        <button ref={menuCloseRef} className="mobile-close" onClick={closeMenu} aria-label="Close menu"><X size={20}/></button>
       </div>
       <div className="sidebar-overline">YOUR WORKSPACE <span>01 / 03</span></div>
       <button className="new-session" onClick={reset}><span className="new-icon"><Sparkles size={16}/></span><span>New research session</span><ArrowUpRight size={16}/></button>
       <div className="side-section"><div className="side-label">RESEARCH SOURCES <span className="label-dash" /></div>
         {(['darglobal','wasalt'] as const).map((id,index)=>{const src=sources.find(s=>s.id===id);return <button key={id}
-          className={`source-option ${sourceFilter.includes(id)?'active':''}`} onClick={()=>toggleSource(id)}>
+          className={`source-option ${sourceFilter.includes(id)?'active':''}`} onClick={()=>toggleSource(id)} aria-pressed={sourceFilter.includes(id)}>
           <div className={`source-icon ${id}`}><Building2 size={17} strokeWidth={1.7}/></div>
           <span className="source-desc"><strong>{sourceName(id)}</strong><small>{src?.documents??'—'} indexed documents</small></span>
           <span className={`source-checkbox ${sourceFilter.includes(id)?'checked':''}`}>{sourceFilter.includes(id)&&<Check size={12}/>}</span>
@@ -223,23 +263,24 @@ export default function Home(){
       <div className="sidebar-spacer" />
       <div className="side-note"><ShieldCheck size={17}/><div><strong>Evidence, not estimates.</strong><span>Every factual answer is linked to the source it came from.</span></div></div>
       <div className="side-footer"><div className="footer-mono">EST / SYSTEM V1.0</div><div className="footer-line"><span className={`small-dot ${online?'ok':''}`} />{online===true?'SYSTEM OPERATIONAL':online===false?'SERVICE DISCONNECTED':'CHECKING SERVICE'}</div></div>
-    </aside>
-    <main className="main-area">
-      <header className="topbar"><div className="top-left"><button className="menu-mobile" onClick={()=>setMobileMenu(true)} aria-label="Open menu"><Menu size={21}/></button>
+    </aside>}
+    <main className="main-area" inert={mobileMenu?true:undefined}>
+      <header className="topbar"><div className="top-left"><button ref={menuButtonRef} className="menu-mobile" onClick={()=>{setEvidenceDrawer(false);setMobileMenu(true)}} aria-label="Open menu" aria-expanded={mobileMenu}><Menu size={21}/></button>
           <span className="breadcrumb-first">WORKSPACE</span><span className="slash">/</span><span className="breadcrumb-current">RESEARCH STUDIO</span></div>
         <div className="top-actions"><div className="connection"><ClockIcon/> {online===true?'CONNECTED':'CONNECTING'}</div>
           <button className="icon-only" title="Reset conversation" onClick={reset}><RotateCcw size={17}/></button>
-          <button className="icon-only right-toggle" onClick={()=>setRightOpen(v=>!v)} title="Toggle evidence panel">{rightOpen?<PanelRightClose size={19}/>:<PanelRightOpen size={19}/>}</button>
+          <button ref={evidenceButtonRef} className="icon-only right-toggle" onClick={()=>{if(compactEvidence){setMobileMenu(false);setEvidenceDrawer(v=>!v)}else setRightOpen(v=>!v)}} title="Toggle evidence panel" aria-label="Toggle evidence panel" aria-expanded={showEvidence}>{showEvidence?<PanelRightClose size={19}/>:<PanelRightOpen size={19}/>}</button>
           <div className="avatar">EI</div>
         </div>
       </header>
-      <div className={`central-layout ${rightOpen?'has-right':''}`}>
-        <section className="conversation-area">
+      <div className={`central-layout ${showEvidence?'has-right':''}`}>
+        <section className="conversation-area" inert={evidenceDrawer?true:undefined}>
+          <div className="research-scroll" aria-label="Conversation" tabIndex={0}>
           {messages.length===0 ? <div className="landing">
             <div className="hero-brow"><span className="tiny-line"/> INTELLIGENCE / REAL ESTATE <span className="hero-brow-number">001—2026</span></div>
             <h1>Every property<br/>has a <em>story.</em><br/><span>Find the facts.</span></h1>
             <p className="hero-desc">Source-grounded research across global developments and Saudi Arabian real estate. Built to distinguish what&apos;s documented from what&apos;s assumed.</p>
-            <div className="hero-data"><div><span>ACTIVE SOURCES</span><strong>02<span className="data-sup">/02</span></strong></div><div><span>INDEXED RECORDS</span><strong>{docCount.toString().padStart(2,'0')}</strong></div><div><span>RETRIEVAL</span><strong className="data-mode">HYBRID <span>↗</span></strong></div></div>
+            <div className="hero-data"><div><span>ACTIVE SOURCES</span><strong>{String(activeCount).padStart(2,'0')}<span className="data-sup">/02</span></strong></div><div><span>INDEXED RECORDS</span><strong>{docCount.toString().padStart(2,'0')}</strong></div><div><span>RETRIEVAL</span><strong className="data-mode">HYBRID <span>↗</span></strong></div></div>
             <ArchitectureGraphic/>
             <div className="suggest-section"><div className="suggest-heading"><span>START EXPLORING</span><span className="right-tip">CURATED RESEARCH PATHS <ArrowDown size={12}/></span></div>
               <div className="suggest-grid">{SUGGESTIONS.map(s=><button key={s.title} className="suggest-card" onClick={()=>send(s.query)}>
@@ -257,20 +298,21 @@ export default function Home(){
                 {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}{m.fallback&&<span>Fallback used</span>}</div>}
               </div></div>)}
             <div ref={bottomRef}/></div>}
+          </div>
           <div className="composer-wrap"><div className="composer"><div className="composer-head"><div className="model-control">
                 <button className={`model-trigger ${modelOpen?'selected':''}`} onClick={()=>setModelOpen(v=>!v)} aria-expanded={modelOpen}><span className="model-orb"><Sparkles size={14}/></span><span className="model-verb">MODEL</span><strong>{models.find(m=>m.id===model)?.name||'Auto · Free router'}</strong><ChevronDown size={14}/></button>
                 {modelOpen&&<div className="model-popover"><input value={modelQuery} onChange={e=>setModelQuery(e.target.value)} placeholder="Search free models..." autoFocus/><div className="catalog-status"><span>{catalogLoading?'Refreshing…':catalogOnline?`${models.length-1} selectable free models`:'Catalogue unavailable · auto router only or cached models'}</span><button type="button" disabled={catalogLoading} onClick={()=>refreshModels(true)}>Refresh</button></div><div className="model-results">{filteredModels.slice(0,70).map(m=><button key={m.id} className={m.id===model?'current':''} onClick={()=>{setModel(m.id);setModelOpen(false);setModelQuery('')}}><span><strong>{m.name}</strong><small>{m.id}</small></span><span className="model-badges">FREE {m.tools?'· TOOLS':''}</span></button>)}{!filteredModels.length&&<span className="model-empty">No available matching models</span>}</div></div>}
                 </div><span className="composer-mode"><CircleDot size={13}/> VERIFIED SOURCES ONLY</span></div>
               {!aiReady&&<div className="diagnostic-line">OpenRouter key not configured or not yet checked. Configure the backend before AI generation.</div>}
-              <textarea ref={inputRef} rows={2} value={input} disabled={busy} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}} maxLength={1500} placeholder="Ask anything about properties, locations, developments..." aria-label="Ask a real estate research question"/>
+              <textarea ref={inputRef} rows={2} value={input} disabled={busy} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();send()}}} maxLength={1500} placeholder="Ask anything about properties, locations, developments..." aria-label="Ask a real estate research question"/>
               <div className="composer-foot"><span><kbd>↵</kbd> to send <b>·</b> <kbd>shift ↵</kbd> for new line</span><div className="composer-foot-right"><span>{input.length}/1500</span><button onClick={()=>busy?abortRef.current?.abort():send()} disabled={!busy&&input.trim().length<3} className="submit-btn" title={busy?"Stop generating":"Submit question"} aria-label={busy?"Stop generating":"Submit question"}>{busy?<X size={18}/>:<ArrowUp size={19}/>}</button></div></div>
             </div><div className="composer-disclaimer"><ShieldCheck size={12}/> Responses are research aids. Verify financial decisions with official sources.</div></div>
         </section>
-        {rightOpen&&<aside className="evidence-panel"><div className="evidence-top"><span>RESEARCH CONTEXT</span><span className="panel-count">02 / 02</span></div>
+        {showEvidence&&<aside id="evidence-drawer" className={`evidence-panel ${compactEvidence?'evidence-drawer':''}`} role={compactEvidence?'dialog':undefined} aria-modal={compactEvidence?true:undefined} aria-label="Source evidence"><div className="evidence-top"><span>RESEARCH CONTEXT</span>{compactEvidence?<button ref={evidenceCloseRef} className="icon-only drawer-close" onClick={closeEvidence} aria-label="Close evidence panel"><X size={20}/></button>:<span className="panel-count">{String(activeCount).padStart(2,'0')} / 02</span>}</div>
           <div className="evidence-title">The evidence<br/><em>behind the answer.</em></div>
           <div className="evidence-divider"/>
           <div className="panel-heading">SOURCE CONNECTIONS <span>●</span></div>
-          <div className="connection-list">{(['darglobal','wasalt'] as const).map(id=>{const s=sources.find(x=>x.id===id);return <div className="connection-card" key={id}><div className="conn-symbol"><Globe2 size={17}/></div><div className="conn-data"><strong>{sourceName(id)}</strong><small>{s?.documents??0} indexed documents</small><span className={s?.permitted?'conn-status indexed':'conn-status restricted'}>{s?.permitted?'PERMITTED':'RESTRICTED / PENDING'}</span></div><a target="_blank" rel="noopener noreferrer" href={id==='darglobal'?'https://darglobal.co.uk/':'https://wasalt.sa/'} aria-label={`Open ${id}`}><ArrowUpRight size={16}/></a></div>})}</div>
+          <div className="connection-list">{(['darglobal','wasalt'] as const).map(id=>{const s=sources.find(x=>x.id===id);return <div className="connection-card" key={id}><div className="conn-symbol"><Globe2 size={17}/></div><div className="conn-data"><strong>{sourceName(id)}</strong><small>{s?.documents??0} indexed documents</small><span className={s?.permitted?'conn-status indexed':'conn-status restricted'}>{s?.permitted?'PERMITTED':s?.last_run_status==='unavailable'?'UNAVAILABLE':'RESTRICTED / PENDING'}</span>{s?.last_run_status&&<small className="source-status-detail">{s.last_run_status.replaceAll('_',' ')}{s.permission_note?` · ${s.permission_note}`:''}</small>}</div><a target="_blank" rel="noopener noreferrer" href={id==='darglobal'?'https://darglobal.co.uk/':'https://wasalt.sa/'} aria-label={`Open ${id}`}><ArrowUpRight size={16}/></a></div>})}</div>
           <div className="evidence-divider"/>
           <div className="panel-heading">EVIDENCE LOG <span>{latestSources.length.toString().padStart(2,'0')}</span></div>
           {latestSources.length? <div className="evidence-log">{latestSources.map((s,i)=><a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="evidence-item"><span className="evidence-id">{s.id}</span><span><strong>{s.title}</strong><small>{sourceName(s.source)} · source record</small><small>{s.excerpt}</small></span><ExternalLink size={13}/></a>)}</div>:<div className="empty-evidence"><div className="empty-radar"><span/><span/><span/><CircleDot size={19}/></div><strong>Awaiting first discovery</strong><p>Verified citations and source signals will appear here as you research.</p></div>}

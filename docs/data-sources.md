@@ -18,6 +18,21 @@
 - `WASALT_AUTHORIZED=true` **and** `WASALT_AUTHORIZATION_REFERENCE=...` provide an administrative attestation, not independent verification. The operator must retain the actual permission document securely.
 - Authorized export alternative: CSV/JSON with source `url`, `title`, `content` and optional `language`. The import also requires an authorization reference.
 
+### Dedicated marketplace ingestion
+
+The updated adapter is split into `wasalt.py` (crawl scheduling), `wasalt_site.py` (public URL discovery, canonicalization, category selection, bounded pagination), and `wasalt_parser.py` (listing/project extraction). It starts with sale/rent category pages, interleaves detail pages across cities, extracts known property facts from individual descriptions and matching JSON-LD, and indexes actual visible category card labels separately. Project ranges and starting prices are retained as qualified text rather than exact prices. Missing facts remain absent. The property row and text index are committed together. Related-property prices, contact links, and broker/license fields are excluded by the targeted parser. No browser automation or private endpoints are used.
+
+Public route patterns checked against official pages during the update:
+
+- `https://wasalt.sa/en/apartments-for-sale-in-riyadh`
+- `https://wasalt.sa/en/properties-for-rent-in-jeddah`
+- `/en/property/sale/<slug>` and `/en/property/rent/<slug>`
+- `/en/project/<city>/<slug>`
+- Public category pagination uses `?page=N`; only advertised/visible next pages are followed, with a bounded maximum.
+
+Optional `--query` selects a city, property type and sale/rent category. `WASALT_DETAILS_PER_CATEGORY`, `WASALT_MAX_CATEGORY_PAGES`, and `WASALT_MAX_RESPONSE_BYTES` control the page budget and response limit. The underlying English routes may contain Arabic listing descriptions; both are retained. Source-specific routing also applies to on-demand discovery. No live Wasalt integration run is claimed: current raw HTML and robots policies must be verified from the running Codespace. The offline fixtures model the public page structure, not actual property records. JS-only content, access-denied pages, and unadvertised fields can still be unavailable. Import an authorized data export if direct access does not succeed.
+
+
 ## Selectable crawling engines
 
 Both official-source adapters support `--engine httpx` (default) or

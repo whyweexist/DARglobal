@@ -13,6 +13,7 @@ from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core.config import settings
 from app.ingestion.policy import (
     PolicyDenied,
     SourcePolicy,
@@ -60,7 +61,7 @@ async def fetch_allowed_page(
     source: str,
     *,
     engine: str = "httpx",
-    size_limit: int = MAX_RESPONSE_BYTES,
+    size_limit: int | None = None,
 ) -> FetchedPage:
     """Get an official HTML page using the selected engine.
 
@@ -69,11 +70,13 @@ async def fetch_allowed_page(
     No silent HTTPX fallback occurs when Scrapling is unavailable or fails.
     """
     require_engine(engine)
+    if size_limit is None:
+        size_limit = settings().wasalt_max_response_bytes if source == "wasalt" else MAX_RESPONSE_BYTES
     validate_official_url(url, source)
     if engine == "httpx":
-        html = await permitted_request(client, policy, url, source, size_limit=size_limit)
+        final_url, html = await permitted_request(client, policy, url, source, size_limit=size_limit)
         links = [str(a["href"]) for a in BeautifulSoup(html, "lxml").find_all("a", href=True)[:250]]
-        return FetchedPage(url=url, html=html, links=links, engine=engine)
+        return FetchedPage(url=final_url, html=html, links=links, engine=engine)
 
     try:
         from scrapling.fetchers import AsyncFetcher
