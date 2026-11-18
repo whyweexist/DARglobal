@@ -50,6 +50,7 @@ tests/test_chat_regressions.py
 tests/test_docker_context.py
 tests/test_pipeline.py
 tests/test_scrapling_option.py
+tests/test_scrapling_runtime.py
 tests/test_security.py
 tests/test_source_discovery.py
 tests/test_wasalt_adapter.py

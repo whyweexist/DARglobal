@@ -8,10 +8,10 @@ from urllib.parse import urljoin, urlparse, urldefrag
 import xml.etree.ElementTree as ET
 import httpx
 from app.core.config import settings
-from app.ingestion.policy import SourcePolicy, PolicyDenied, USER_AGENT, validate_official_url
+from app.ingestion.policy import SourcePolicy, PolicyDenied, ChallengeBlocked, USER_AGENT, reject_challenge, validate_official_url
 from app.ingestion.parser import parse_html
 from bs4 import BeautifulSoup
-from app.ingestion.fetchers import fetch_allowed_page, require_engine, scrapling_available
+from app.ingestion.fetchers import ScraplingCrawlSession, fetch_allowed_page, require_engine, scrapling_available
 from app.rag.indexer import upsert_page
 from app.ingestion import wasalt_site
 
@@ -87,6 +87,7 @@ async def discover_sitemap(client: httpx.AsyncClient, policy: SourcePolicy, url:
         validate_official_url(url, source)
         await policy.check(url, source)
         response = await client.get(url, timeout=12, follow_redirects=False)
+        reject_challenge(response.headers, response.status_code, response.text[:16000])
         response.raise_for_status()
         if len(response.content) > 2_000_000:
             return []
@@ -109,6 +110,8 @@ async def discover_sitemap(client: httpx.AsyncClient, policy: SourcePolicy, url:
                 if len(result) >= limit:
                     break
         return result[:limit]
+    except ChallengeBlocked:
+        raise
     except (httpx.HTTPError, ValueError, ET.ParseError, PolicyDenied) as exc:
         log.info("sitemap discovery skipped (%s)", type(exc).__name__)
         return []
@@ -133,9 +136,15 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
         report.errors = 1
         return report
     async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xml"},
-                                  trust_env=False, limits=httpx.Limits(max_connections=3)) as client:
+                                  trust_env=False, limits=httpx.Limits(max_connections=3)) as client, ScraplingCrawlSession() as session:
         policy = SourcePolicy(client)
-        seeds = await discover_sitemap(client, policy, base_url.rstrip("/") + "/sitemap.xml", source, limit * 3)
+        sitemap_url = base_url.rstrip("/") + "/sitemap.xml"
+        try:
+            seeds = await discover_sitemap(client, policy, sitemap_url, source, limit * 3)
+        except ChallengeBlocked as exc:
+            report.status, report.detail, report.errors = "access_restricted", str(exc), 1
+            report.failures.append({"url": sitemap_url, "reason": str(exc)})
+            return report
         # No sitemap access means crawl only from the official, permitted homepage.
         candidates = deque(([DARGLOBAL_CATALOG, base_url] if source == "darglobal" else [base_url]) + seeds)
         seen = set()
@@ -154,7 +163,7 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
                     report.urls.append(current)
                     report.fetched += 1
                     continue
-                fetched = await fetch_allowed_page(client, policy, current, source, engine=selected_engine)
+                fetched = await fetch_allowed_page(client, policy, current, source, engine=selected_engine, session=session)
                 report.fetched += 1
                 report.urls.append(current)
                 parsed = parse_html(fetched.html, source, url=fetched.url)
@@ -189,6 +198,10 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
                 report.errors += 1
                 report.failures.append({"url": current, "reason": failure_reason(exc)})
                 log.warning("crawl error: source=%s url=%s type=%s", source, current, type(exc).__name__)
+                if isinstance(exc, ChallengeBlocked) or any(f"HTTP {code}" in failure_reason(exc) for code in (401, 403, 429)):
+                    break
+        if any("Cloudflare security challenge" in f["reason"] for f in report.failures):
+            report.status = "access_restricted"
         if report.errors and report.status == "complete":
             report.status = "partial" if report.fetched else "unavailable"
         if report.failures and not report.detail:

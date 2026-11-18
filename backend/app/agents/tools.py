@@ -8,8 +8,8 @@ import httpx
 from app.core.config import settings
 from app.ingestion.crawler import DARGLOBAL_CATALOG, catalog_links, discover_sitemap, eligible_link, failure_reason
 from app.ingestion.parser import parse_html
-from app.ingestion.policy import USER_AGENT, PolicyDenied, SourcePolicy
-from app.ingestion.fetchers import fetch_allowed_page
+from app.ingestion.policy import USER_AGENT, ChallengeBlocked, PolicyDenied, SourcePolicy
+from app.ingestion.fetchers import ScraplingCrawlSession, fetch_allowed_page
 from app.rag.indexer import upsert_page
 from app.rag.retrieval import significant_tokens
 from app.ingestion.wasalt_site import seed_urls, kind as wasalt_kind
@@ -43,7 +43,7 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
     name = 'discover_official_source_pages'
     if budget <= 0:
         return [SearchActivity(name, 'skipped', 'Live discovery disabled')]
-    async with httpx.AsyncClient(headers={'User-Agent': USER_AGENT}, follow_redirects=False, trust_env=False, timeout=12) as client:
+    async with httpx.AsyncClient(headers={'User-Agent': USER_AGENT}, follow_redirects=False, trust_env=False, timeout=12) as client, ScraplingCrawlSession() as session:
         policy = SourcePolicy(client)
         # An explicit marketplace question must not exhaust its live budget
         # on the developer catalogue before Wasalt is checked.
@@ -79,7 +79,7 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                 source_budget -= 1
                 attempted.add(url)
                 try:
-                    page = await fetch_allowed_page(client, policy, url, source, engine=cfg.scraper_engine)
+                    page = await fetch_allowed_page(client, policy, url, source, engine=cfg.scraper_engine, session=session)
                     links.update(catalog_links(page.html, page.url, source))
                     parsed = parse_html(page.html, source, url=page.url)
                     if not parsed.sections:
@@ -95,8 +95,9 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                         blocked = True
                 except (httpx.HTTPError, ValueError, RuntimeError) as exc:
                     failures.append(f'{url}: {failure_reason(exc)}')
-                    activities.append(SearchActivity('fetch_official_source_page', 'fetch_failed', failures[-1]))
-                    if any(f'HTTP {code}' in failures[-1] for code in (401,403,429)):
+                    challenge = 'Cloudflare security challenge' in failures[-1]
+                    activities.append(SearchActivity('fetch_official_source_page', 'access_restricted' if challenge else 'fetch_failed', failures[-1]))
+                    if challenge or any(f'HTTP {code}' in failures[-1] for code in (401,403,429)):
                         blocked = True
                 if budget > 0 and source_budget > 0 and not blocked:
                     await asyncio.sleep(cfg.crawl_delay_seconds)
@@ -111,9 +112,14 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                 ranked += [u for u in links if wasalt_kind(u)=='detail' and u not in ranked]
                 ranked += [u for u in entries[1:] if u not in ranked]
             if not ranked and budget > 0 and source_budget > 0 and not blocked and source == 'darglobal':
-                urls = await discover_sitemap(client, policy, base + '/sitemap.xml', source, 120)
-                links.update({u: '' for u in urls if eligible_link(source, u) and u not in links})
-                ranked = rank_links(query, links)
+                try:
+                    urls = await discover_sitemap(client, policy, base + '/sitemap.xml', source, 120)
+                    links.update({u: '' for u in urls if eligible_link(source, u) and u not in links})
+                    ranked = rank_links(query, links)
+                except ChallengeBlocked as exc:
+                    blocked = True
+                    failures.append(f'{source}: {exc}')
+                    activities.append(SearchActivity('discover_official_source_pages', 'access_restricted', failures[-1]))
             for url in ranked:
                 if budget <= 0 or source_budget <= 0 or blocked:
                     break

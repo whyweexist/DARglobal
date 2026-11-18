@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     wasalt_details_per_category: int = Field(default=3, ge=1, le=20)
     wasalt_max_response_bytes: int = Field(default=5_000_000, ge=100_000, le=10_000_000)
     wasalt_max_category_pages: int = Field(default=3, ge=1, le=20)
-    wasalt_authorized: bool = True
+    wasalt_authorized: bool = False
     wasalt_authorization_reference: str = ""
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = Field(default=384, ge=16)

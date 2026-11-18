@@ -59,6 +59,7 @@ def test_category_links_preserve_page_and_strip_tracking():
     assert canonical_url('https://wasalt.sa/en/account') is None
     assert canonical_url('https://wasalt.sa:81/en') is None
     assert canonical_url('https://wasalt.sa/en/sale/search?cityId=1') is None
+    assert canonical_url('https://wasalt.sa/en/sale/search') is None
 
 
 def test_query_seeds_target_city_property_and_transaction():
@@ -125,7 +126,7 @@ async def test_specialized_scraper_follows_detail_pages_and_pagination(monkeypat
     authorize(monkeypatch)
     initialize()
     calls=[]
-    async def fetch(client,policy,url,source,*,engine):
+    async def fetch(client,policy,url,source,*,engine,session=None):
         calls.append(url)
         assert source=='wasalt'
         return FetchedPage(url,{CATEGORY:CATALOG_HTML,DETAIL:DETAIL_HTML,PROJECT:PROJECT_HTML,CATEGORY+'?page=2':CATALOG_HTML}[url],[],engine)
@@ -141,7 +142,7 @@ async def test_specialized_scraper_follows_detail_pages_and_pagination(monkeypat
 async def test_access_refusal_stops_without_circumvention(monkeypatch):
     authorize(monkeypatch)
     calls=[]
-    async def deny(client,policy,url,source,*,engine):
+    async def deny(client,policy,url,source,*,engine,session=None):
         calls.append(url)
         req=httpx.Request('GET',url)
         raise httpx.HTTPStatusError('Forbidden',request=req,response=httpx.Response(403,request=req))
@@ -156,7 +157,7 @@ async def test_live_wasalt_lookup_uses_relevant_category_before_details(monkeypa
     authorize(monkeypatch)
     initialize()
     calls=[]
-    async def fetch(client,policy,url,source,*,engine):
+    async def fetch(client,policy,url,source,*,engine,session=None):
         calls.append(url)
         assert source=='wasalt'
         return FetchedPage(url,CATALOG_HTML if url==CATEGORY else DETAIL_HTML,[],engine)
@@ -166,3 +167,26 @@ async def test_live_wasalt_lookup_uses_relevant_category_before_details(monkeypa
     activities=await tools.discover_and_ingest('Wasalt apartments for sale in Riyadh',['wasalt'],max_pages=2)
     assert calls==[CATEGORY,DETAIL]
     assert any(a.found==2 for a in activities)
+
+
+@pytest.mark.asyncio
+async def test_challenge_preserves_authorization_and_stops(monkeypatch):
+    from app.ingestion.policy import ChallengeBlocked
+    from app.ingestion.jobs import record_ingestion
+    from app.db.models import Source
+    authorize(monkeypatch)
+    initialize()
+    calls = []
+    async def deny(client, policy, url, source, *, engine, session=None):
+        calls.append(url)
+        raise ChallengeBlocked('Cloudflare security challenge (HTTP 403)')
+    async def no_sleep(seconds): pass
+    monkeypatch.setattr(wasalt, 'fetch_allowed_page', deny)
+    monkeypatch.setattr(wasalt.asyncio, 'sleep', no_sleep)
+    result = await wasalt.scrape_wasalt(max_pages=30)
+    assert len(calls) == 1
+    assert result.status == 'access_restricted' and result.inserted == 0
+    record_ingestion(result)
+    with session_factory()() as db:
+        assert db.get(Source, 'wasalt').permitted is True
+        assert 'Cloudflare' in db.get(Source, 'wasalt').permission_note

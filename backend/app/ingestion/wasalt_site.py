@@ -17,7 +17,6 @@ CITIES = {'riyadh': 'Riyadh', 'jeddah': 'Jeddah', 'makkah': 'Makkah',
 ARABIC_CITIES = {'الرياض': 'riyadh', 'جدة': 'jeddah', 'مكة': 'makkah', 'المدينة': 'madinah', 'الدمام': 'dammam', 'الخبر': 'al-khobar'}
 CATEGORY = re.compile(r'^/en/(?:properties|apartments|villas|lands|buildings|floors|furnished-apartments|rest-houses|offices|shops|warehouses)-for-(?:sale|rent)-in-[a-z0-9-]+/?$', re.I)
 DETAIL = re.compile(r'^/en/(?:property/(?:sale|rent)/[^/]+|project/[^/]+/[^/]+)/?$', re.I)
-OTHER = re.compile(r'^/en/(?:sale|rent)/search/?$', re.I)
 
 
 def kind(url: str) -> str:
@@ -26,8 +25,6 @@ def kind(url: str) -> str:
         return 'detail'
     if CATEGORY.fullmatch(path):
         return 'category'
-    if OTHER.fullmatch(path):
-        return 'search'
     if path in ('', '/en'):
         return 'home'
     return ''
@@ -51,9 +48,6 @@ def canonical_url(url: str, base: str = BASE) -> str | None:
                 return None
             if int(page) > 1:
                 target += '?' + urlencode({'page': int(page)})
-        # Search routes with filters are intentionally not crawled. Use SEO categories instead.
-        if role == 'search' and p.query:
-            return None
         return target
     except ValueError:
         return None

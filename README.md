@@ -120,7 +120,7 @@ make export
 
 `make local-api` launches only FastAPI; `make local-ingest` refreshes permitted sources, and `make local-scrape-wasalt` requires independently documented authorization. `make export` writes real stored documents, properties and chunks to CSV/JSON under `data/exports/`, which is gitignored. Keep these exports private unless the content license permits redistribution.
 
-If you change dependencies or enable optional Scrapling after the first install, rerun `make local-setup`. To enable Scrapling in native mode, set `SCRAPER_ENGINE=scrapling` and `ENABLE_SCRAPLING=true` in `.env` before setup.
+If you change dependencies, rerun `make local-setup`. The native runner now detects a missing Scrapling extra even in an existing virtual environment, including an explicit `--engine scrapling` override. To enable Scrapling in native mode, set `SCRAPER_ENGINE=scrapling` and `ENABLE_SCRAPLING=true` in `.env` before setup.
 
 ### If the chatbot was returning the same answer every time
 
@@ -136,7 +136,7 @@ source authorization, robots.txt checks, URL allowlist, bounded crawl and SQLite
 | Engine | Behavior | Dependency |
 |---|---|---|
 | `httpx` (default) | HTTPX streaming fetch + BeautifulSoup link extraction | Included |
-| `scrapling` | Scrapling `AsyncFetcher` HTTP fetch + native CSS link extraction | Opt-in `scrapling[fetchers]==0.5.1` |
+| `scrapling` | Scrapling async `FetcherSession` HTTP fetch + native CSS link extraction | Opt-in `scrapling[fetchers]==0.5.1` |
 
 **Enable Scrapling in GitHub Codespaces / Docker:** in `.env`, set:
 
@@ -175,6 +175,8 @@ Robots/sitemaps are checked through HTTPX; Scrapling fetches and parses permitte
 HTML pages. Responses are checked for type and size (Scrapling buffers the body
 before this post-fetch check), and redirects are validated per hop. There is no
 silent fallback to HTTPX if the selected Scrapling engine is unavailable.
+
+A `cf-mitigated: challenge` response is recorded as `access_restricted`, not an authorization failure or property listing. Obtain approved access or a permitted data export if the site challenges requests.
 
 See [Scrapling integration documentation](docs/scrapling.md) and the
 [Scrapling repository](https://github.com/D4Vinci/Scrapling).

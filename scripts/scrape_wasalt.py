@@ -20,7 +20,7 @@ async def main():
     if not args.dry_run:
         record_ingestion(result)
     print(json.dumps(result.__dict__, indent=2))
-    if result.status in {"permission_required", "unavailable"}:
+    if result.status in {"permission_required", "unavailable", "access_restricted"}:
         raise SystemExit(2)
 
 if __name__ == "__main__":

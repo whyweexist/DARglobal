@@ -13,7 +13,8 @@ jobs:
         run: |
           pip install uv
           cd backend
-          uv pip install --system --torch-backend cpu -e '.[dev]'
+          uv pip install --system --torch-backend cpu -e '.[dev,scrapling]'
+          python -c 'from scrapling.fetchers import FetcherSession'
       - name: Tests
         env:
           DATABASE_URL: sqlite:////tmp/estate-ci.db

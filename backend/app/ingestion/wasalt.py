@@ -6,7 +6,7 @@ from collections import deque
 import httpx
 from app.core.config import settings
 from app.ingestion.crawler import CrawlReport, failure_reason
-from app.ingestion.fetchers import fetch_allowed_page, require_engine, scrapling_available
+from app.ingestion.fetchers import ScraplingCrawlSession, fetch_allowed_page, require_engine, scrapling_available
 from app.ingestion.policy import PolicyDenied, SourcePolicy, USER_AGENT, assert_source_authorized
 from app.ingestion.parser import parse_html
 from app.ingestion.wasalt_site import canonical_url, kind, listing_links, next_page, seed_urls
@@ -40,7 +40,7 @@ async def scrape_wasalt(*, max_pages: int | None = None, dry_run: bool = False,
     indexed = 0
     blocked = False
     async with httpx.AsyncClient(headers={'User-Agent': USER_AGENT,'Accept':'text/html'},trust_env=False,
-                                 follow_redirects=False, timeout=15) as client:
+                                 follow_redirects=False, timeout=15) as client, ScraplingCrawlSession() as session:
         policy = SourcePolicy(client)
         while (categories or details or priority_details) and len(seen) < limit:
             queue = priority_details or categories or details
@@ -53,7 +53,7 @@ async def scrape_wasalt(*, max_pages: int | None = None, dry_run: bool = False,
                     await policy.check(url, 'wasalt')
                     report.urls.append(url)
                     continue
-                page = await fetch_allowed_page(client, policy, url, 'wasalt', engine=selected)
+                page = await fetch_allowed_page(client, policy, url, 'wasalt', engine=selected, session=session)
                 report.fetched += 1
                 report.urls.append(page.url)
                 parsed = parse_html(page.html, 'wasalt', url=page.url)
@@ -84,7 +84,7 @@ async def scrape_wasalt(*, max_pages: int | None = None, dry_run: bool = False,
                 report.failures.append({'url':url,'reason':reason})
                 log.warning('Wasalt collection: %s %s',url,reason)
                 # Do not try to get around access refusals or rate limits.
-                if 'HTTP 403' in reason or 'HTTP 429' in reason or 'HTTP 401' in reason:
+                if 'Cloudflare security challenge' in reason or any(f'HTTP {code}' in reason for code in (401,403,429)):
                     break
             finally:
                 if not dry_run and len(seen)<limit:
@@ -97,6 +97,8 @@ async def scrape_wasalt(*, max_pages: int | None = None, dry_run: bool = False,
         report.detail = 'No Wasalt listing evidence indexed'
     elif report.failures:
         report.status = 'partial'
+    if any("Cloudflare security challenge" in f["reason"] for f in report.failures):
+        report.status = "access_restricted"
     if report.failures:
         report.detail = '; '.join(filter(None,[report.detail, *(f['reason'] for f in report.failures[:3])]))
     return report

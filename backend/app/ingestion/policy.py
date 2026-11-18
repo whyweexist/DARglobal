@@ -21,6 +21,19 @@ class PolicyDenied(ValueError):
     pass
 
 
+class ChallengeBlocked(RuntimeError):
+    """A server security challenge, not a configuration/parse failure."""
+
+
+def reject_challenge(headers: httpx.Headers, status: int, body: str = "") -> None:
+    # Cloudflare documents cf-mitigated: challenge as the reliable signal.
+    # Also reject recognizable challenge HTML if an intermediary strips it.
+    sample = body[:16000].casefold()
+    if (headers.get("cf-mitigated", "").casefold() == "challenge" or
+            ("just a moment" in sample and "challenges.cloudflare.com" in sample)):
+        raise ChallengeBlocked(f"Cloudflare security challenge (HTTP {status}); approved crawler access required")
+
+
 @dataclass(frozen=True)
 class Permission:
     allowed: bool
@@ -43,6 +56,8 @@ def validate_official_url(url: str, source: str) -> str:
     host = (parsed.hostname or "").lower()
     if parsed.scheme != "https" or host not in ALLOWED[source] or parsed.port not in (None, 443):
         raise PolicyDenied("Only HTTPS official-source hosts are allowed")
+    if source == "wasalt" and any(part.casefold() == "search" for part in parsed.path.split("/")):
+        raise PolicyDenied("Wasalt internal search routes are outside the collection scope")
     if parsed.username or parsed.password or parsed.fragment:
         raise PolicyDenied("URL credentials/fragments are not permitted")
     try:
@@ -73,6 +88,7 @@ class SourcePolicy:
                 if not target.endswith("/robots.txt"):
                     raise PolicyDenied("robots.txt redirected to a non-robots document")
                 response = await self.client.get(target, follow_redirects=False, timeout=10)
+            reject_challenge(response.headers, response.status_code, response.text)
             if response.status_code != 200:
                 raise PolicyDenied(f"robots.txt unavailable (HTTP {response.status_code}); fail closed")
             parser = RobotFileParser()
@@ -94,6 +110,7 @@ async def permitted_request(client: httpx.AsyncClient, policy: SourcePolicy, url
                 validate_official_url(target, source)
                 current = target
                 continue
+            reject_challenge(response.headers, response.status_code)
             response.raise_for_status()
             if "html" not in response.headers.get("content-type", "").lower():
                 raise ValueError("Expected HTML response")
@@ -102,5 +119,7 @@ async def permitted_request(client: httpx.AsyncClient, policy: SourcePolicy, url
                 result.extend(chunk)
                 if len(result) > size_limit:
                     raise ValueError("Document exceeds allowed response size")
-            return current, result.decode(response.encoding or "utf-8", errors="replace")
+            html = result.decode(response.encoding or "utf-8", errors="replace")
+            reject_challenge(response.headers, response.status_code, html)
+            return current, html
     raise PolicyDenied("Too many redirects or redirect loop")

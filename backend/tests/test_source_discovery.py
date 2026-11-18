@@ -32,7 +32,7 @@ async def test_live_catalogue_discovery_indexes_relevant_record(monkeypatch):
     monkeypatch.setenv('CRAWL_DELAY_SECONDS', '0.5')
     settings.cache_clear()
     calls = []
-    async def fetch(client, policy, url, source, *, engine):
+    async def fetch(client, policy, url, source, *, engine, session=None):
         calls.append(url)
         html = CATALOG if url == DARGLOBAL_CATALOG else '<title>DG1 Dubai</title><main><h2>Amenities</h2><p>Residents have access to a swimming pool and an indoor gym.</p></main>'
         return FetchedPage(url, html, [], engine)
@@ -48,7 +48,7 @@ async def test_live_catalogue_discovery_indexes_relevant_record(monkeypatch):
 @pytest.mark.asyncio
 async def test_live_fetch_failure_reports_actual_status(monkeypatch):
     from app.agents import tools
-    async def denied(client, policy, url, source, *, engine):
+    async def denied(client, policy, url, source, *, engine, session=None):
         req = httpx.Request('GET',url)
         raise httpx.HTTPStatusError('Forbidden',request=req,response=httpx.Response(403,request=req))
     monkeypatch.setattr(tools,'fetch_allowed_page',denied)

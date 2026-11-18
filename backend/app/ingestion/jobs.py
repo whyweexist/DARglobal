@@ -23,7 +23,7 @@ def record_ingestion(report: CrawlReport) -> None:
         db.add(row)
         source = db.get(Source, report.source)
         if source:
-            source.permitted = report.status not in {"permission_required", "unavailable"}
+            source.permitted = (settings().wasalt_permitted if report.source == "wasalt" else settings().darglobal_enabled)
             source.permission_note = report.detail or ("Permission gate passed; robots respected" if source.permitted else "")
             source.last_checked = datetime.now(timezone.utc)
             if (report.inserted or report.updated or (report.fetched and report.skipped and not report.errors)) and report.status in {"complete", "partial"}:

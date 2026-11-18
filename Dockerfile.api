@@ -25,6 +25,7 @@ RUN set -eu; \
     fi; \
     if [ "$ENABLE_SCRAPLING" = "true" ]; then \
       uv pip install --system --no-cache '.[scrapling]'; \
+      python -c 'from scrapling.fetchers import FetcherSession; from importlib.metadata import version; print("Scrapling", version("scrapling"))'; \
     else \
       uv pip install --system --no-cache .; \
     fi; \

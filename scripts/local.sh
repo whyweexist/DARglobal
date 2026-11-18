@@ -10,12 +10,35 @@ export DATABASE_URL="sqlite:///$ROOT/data/estate.db"
 export HF_HOME="$ROOT/data/models-cache" UV_HTTP_TIMEOUT=120 UV_HTTP_RETRIES=5
 export API_URL_INTERNAL="http://127.0.0.1:8000"
 mode="${1:-up}"; if [ "$#" -gt 0 ]; then shift; fi
-if [ "$mode" = setup ] || [ ! -x backend/.venv/bin/python ]; then
-  # Check .env as data instead of sourcing it as executable shell code.
-  extras=()
-  if [ "${ENABLE_SCRAPLING:-}" = true ] || [ "${SCRAPER_ENGINE:-}" = scrapling ] || grep -Eq '^[[:space:]]*(SCRAPER_ENGINE=scrapling|ENABLE_SCRAPLING=true)[[:space:]]*$' .env; then extras+=(--extra scrapling); fi
+# An explicit per-run --engine scrapling also needs the optional extra.
+# Existing virtual environments must not cause the installation to be skipped.
+extras=()
+want_scrapling=false
+if [ "${ENABLE_SCRAPLING:-}" = true ] || [ "${SCRAPER_ENGINE:-}" = scrapling ] || \
+   grep -Eq "^[[:space:]]*(SCRAPER_ENGINE[[:space:]]*=[[:space:]]*['\"]?scrapling['\"]?|ENABLE_SCRAPLING[[:space:]]*=[[:space:]]*['\"]?true['\"]?)[[:space:]]*(#.*)?$" .env; then
+  want_scrapling=true
+fi
+previous=""
+for arg in "$@"; do
+  if [ "$arg" = --engine=scrapling ] || { [ "$previous" = --engine ] && [ "$arg" = scrapling ]; }; then
+    want_scrapling=true
+  fi
+  previous="$arg"
+done
+needs_setup=false
+if [ "$mode" = setup ] || [ ! -x backend/.venv/bin/python ]; then needs_setup=true; fi
+if [ "$want_scrapling" = true ]; then
+  extras+=(--extra scrapling)
+  if ! backend/.venv/bin/python -c 'from scrapling.fetchers import FetcherSession' >/dev/null 2>&1; then
+    needs_setup=true
+  fi
+fi
+if [ "$needs_setup" = true ]; then
   (cd backend && uv sync "${extras[@]}" --extra dev)
   (cd backend && uv run --no-sync python -c 'import torch; assert torch.version.cuda is None, "Expected CPU-only PyTorch"')
+  if [ "$want_scrapling" = true ]; then
+    (cd backend && uv run --no-sync python -c 'from scrapling.fetchers import FetcherSession; from importlib.metadata import version; print("Scrapling", version("scrapling"))')
+  fi
 fi
 backend() { (cd "$ROOT/backend" && uv run --no-sync --env-file "$ROOT/.env" "$@"); }
 case "$mode" in

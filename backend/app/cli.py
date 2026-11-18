@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from importlib.metadata import version
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.schema import initialize, rebuild_fts
@@ -62,7 +63,8 @@ def main():
                           "openrouter_configured": bool(settings().openrouter_api_key),
                           "wasalt_authorized": settings().wasalt_permitted,
                           "scraper_engine": settings().scraper_engine,
-                          "scrapling_installed": scrapling_available()}))
+                          "scrapling_installed": scrapling_available(),
+                          "scrapling_version": version("scrapling") if scrapling_available() else None}))
     elif args.command == "check-ai":
         from app.local_tools import check_ai
         report = asyncio.run(check_ai(args.model))

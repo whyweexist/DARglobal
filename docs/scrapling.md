@@ -5,7 +5,7 @@
 This project provides an **opt-in Scrapling HTTP + CSS extraction engine** next
 to the existing HTTPX + BeautifulSoup path. It targets the verified Scrapling
 **0.5.1** API (`scrapling[fetchers]==0.5.1`) and calls
-`await scrapling.fetchers.AsyncFetcher.get(...)`. It does **not** use stealth,
+`async with scrapling.fetchers.FetcherSession(...) as session` and `await session.get(url)`. A reusable session is opened lazily for a permitted page, reused for the crawl or live discovery, and closed even on errors. It does **not** use stealth,
 headless browsers, cloud challenge solving, proxy rotation, browser fingerprint
 impersonation or private APIs. No Playwright browser download is required.
 
@@ -20,7 +20,7 @@ flowchart TD
     C --> D[HTTPX robots.txt / sitemap discovery]
     D --> E{SCRAPER_ENGINE}
     E -->|httpx| F[HTTPX bounded streaming HTML fetch]
-    E -->|scrapling| G[Scrapling AsyncFetcher HTML fetch]
+    E -->|scrapling| G[Scrapling FetcherSession HTML fetch]
     F --> H[BeautifulSoup anchor extraction]
     G --> I[Scrapling CSS anchor extraction]
     H --> J[Shared parser / normalization]
@@ -89,7 +89,7 @@ the public chat API.
 - `stealthy_headers=False` and `impersonate=None` are used to avoid browser
   masquerading. No access-control bypass or anti-bot evasion is enabled.
 - Content type must be HTML, status must be HTTP 200, and page data is rejected
-  if its body exceeds 1.5 MB. Scrapling returns a fully buffered body, so this
+  if its body exceeds the configured source limit (1.5 MB DarGlobal, `WASALT_MAX_RESPONSE_BYTES` for Wasalt). Scrapling returns a fully buffered body, so this
   check is after transport; HTTPX streams and enforces the limit while reading.
 - Missing optional dependencies yield an explicit `unavailable` crawl report;
   the standalone script exits with code 2. No silent engine fallback.
@@ -101,7 +101,7 @@ the public chat API.
 
 ```bash
 cd backend
-uv run --extra dev pytest -q tests/test_scrapling_option.py
+uv run --extra dev pytest -q tests/test_scrapling_option.py tests/test_scrapling_runtime.py
 ```
 
 Tests verify engine validation, parser output, redirect refusal, body-size limits,
@@ -122,3 +122,41 @@ relying on the integration in production.
 - **Unexpectedly large pages:** use HTTPX engine to enforce size during streaming.
 - **Container footprint:** browser binaries are deliberately not installed;
   the Scrapling fetchers extra still adds Python dependencies.
+
+
+## Upstream reference and real package verification
+
+- GitHub: https://github.com/D4Vinci/Scrapling
+- HTTP fetcher and reusable sessions: https://scrapling.readthedocs.io/en/latest/fetching/static.html
+- Response fields and CSS selectors: https://scrapling.readthedocs.io/en/latest/api-reference/response.html
+- Pinned release: https://pypi.org/project/scrapling/0.5.1/
+
+From the root of the project:
+
+```bash
+ENABLE_SCRAPLING=true make local-setup
+make local-doctor
+cd backend
+uv run --no-sync pytest -q tests/test_scrapling_runtime.py
+cd ..
+make local-scrape-darglobal ARGS="--engine scrapling --max-pages 3"
+```
+
+`doctor` reports the installed version. The real-package test verifies async session
+lifecycle, the crawler's User-Agent, byte responses, CSS selection and disabled
+redirects against a loopback HTTP test server. It skips when Scrapling is not installed;
+CI installs the pinned extra and checks the import before running the suite. No test
+website content is added to the runtime database. The runtime test was not executed
+against the installed package in the ZIP build environment because package downloads
+were unavailable there.
+
+## Wasalt access restrictions
+
+The provided response `cf-mitigated: challenge` plus `HTTP 403` identifies a
+Cloudflare challenge, not an HTML parser defect. Both fetch engines reject that
+header and recognizable challenge HTML even when a challenge is returned with
+HTTP 200. A crawl or live lookup stops for that source on a security challenge,
+401, 403, or 429. Source status separates configured authorization from actual
+HTTP access. `SCRAPER_ENGINE=scrapling` does not enable a challenge solver.
+Obtain approved automated access or authorized data feed/import from the source.
+A source-specific parser continues to handle listing fields for both engines.
