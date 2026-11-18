@@ -1,5 +1,7 @@
 """Bounded OpenRouter inference, free-only failover and explicit failure reasons."""
 from __future__ import annotations
+import asyncio
+import time
 import json
 import logging
 import re
@@ -45,10 +47,10 @@ async def grounded_answer(question: str, evidence: list[Evidence], selected_mode
     if not cfg.openrouter_api_key.strip():
         return evidence_only(evidence, "llm_unconfigured")
     await registry.validate(selected_model)
-    options = await registry.options()
-    fallbacks = [m['id'] for m in options['models'] if m['id'] not in {selected_model, 'openrouter/free'}
-                 and m['id'].endswith(':free')]
-    candidates = list(dict.fromkeys([selected_model, 'openrouter/free', *fallbacks]))[:3]
+    # Start with the requested route. Catalog I/O is only needed if these
+    # attempts fail; the default free router needs no catalog validation.
+    candidates = list(dict.fromkeys([selected_model, 'openrouter/free']))
+    deadline = time.monotonic() + cfg.llm_total_seconds
     req = {
         'messages': [{'role':'system','content':SYSTEM},
                      {'role':'user','content': json.dumps({'question':question,
@@ -58,11 +60,34 @@ async def grounded_answer(question: str, evidence: list[Evidence], selected_mode
     }
     last_error = 'provider_unavailable'
     async with httpx.AsyncClient(timeout=cfg.llm_timeout_seconds, trust_env=False) as client:
-        for idx, model in enumerate(candidates):
+        idx = 0
+        fallback_catalog_loaded = False
+        while idx < 3:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if idx >= len(candidates):
+                if fallback_catalog_loaded:
+                    break
+                fallback_catalog_loaded = True
+                try:
+                    async with asyncio.timeout(remaining):
+                        options = await registry.options()
+                except TimeoutError:
+                    break
+                candidates.extend(m['id'] for m in options['models'] if m['id'] not in candidates and m['id'].endswith(':free'))
+                if idx >= len(candidates):
+                    break
+            model = candidates[idx]
+            idx += 1
             try:
-                response = await client.post(cfg.openrouter_base_url.rstrip('/')+'/chat/completions',
-                    headers={'Authorization':f'Bearer {cfg.openrouter_api_key.strip()}', 'X-Title':'Estate Intelligence AI'},
-                    json={**req, 'model':model})
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                async with asyncio.timeout(min(remaining, cfg.llm_timeout_seconds)):
+                    response = await client.post(cfg.openrouter_base_url.rstrip('/')+'/chat/completions',
+                        headers={'Authorization':f'Bearer {cfg.openrouter_api_key.strip()}', 'X-Title':'Estate Intelligence AI'},
+                        json={**req, 'model':model})
                 code = response.status_code
                 if code in (401,403):
                     return evidence_only(evidence,'llm_auth_error')
@@ -91,8 +116,8 @@ async def grounded_answer(question: str, evidence: list[Evidence], selected_mode
                     last_error = reason
                     log.warning('OpenRouter output rejected: model=%s reason=%s',model,reason)
                     continue
-                return {**result,'model_used':output.get('model'), 'fallback_used':idx != 0}
-            except httpx.TimeoutException:
+                return {**result,'model_used':output.get('model'), 'fallback_used':idx > 1}
+            except (TimeoutError, httpx.TimeoutException):
                 last_error = 'provider_timeout'
             except httpx.HTTPError:
                 last_error = 'provider_unavailable'

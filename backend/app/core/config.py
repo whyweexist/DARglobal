@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     crawl_max_pages: int = Field(default=50, ge=1, le=250)
     crawl_delay_seconds: float = Field(default=2, ge=0.5)
     darglobal_enabled: bool = True
-    wasalt_engine: Literal["inherit", "httpx", "scrapling", "apify"] = "inherit"
+    wasalt_engine: Literal["inherit", "httpx", "scrapling", "apify"] = "httpx"
     apify_enabled: bool = False
     apify_token: str = ""
     apify_live_search: bool = False
@@ -50,10 +50,13 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(default=6, ge=1, le=20)
     rag_live_search: bool = True
     agent_max_live_pages: int = Field(default=3, ge=0, le=15)
-    agent_max_seconds: int = Field(default=45, ge=2, le=120)
+    agent_max_seconds: int = Field(default=30, ge=2, le=120)
     chat_deadline_seconds: int = Field(default=100, ge=15, le=240)
     llm_max_tokens: int = Field(default=1200, ge=100, le=4000)
-    llm_timeout_seconds: int = Field(default=40, ge=5)
+    llm_timeout_seconds: int = Field(default=30, ge=5)
+    llm_total_seconds: int = Field(default=60, ge=5, le=180)
+    embedding_cpu_threads: int = Field(default=2, ge=1, le=16)
+    source_access_cooldown_seconds: int = Field(default=300, ge=0, le=3600)
     model_catalog_ttl_seconds: int = Field(default=3600, ge=60)
 
     @property

@@ -206,7 +206,7 @@ export default function Home(){
             });
           }
           setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:result.answer||accumulated,citations:result.sources||[],
-            status:result.status,model:result.model_used||undefined,activity:result.tool_activity||[],reason:result.reason,fallback:result.fallback_used,query:result.retrieval_query,loading:false}:m));
+            status:result.status,model:result.model_used||undefined,activity:result.tool_activity||[],reason:result.reason,fallback:result.fallback_used,query:result.retrieval_query,timings:result.timings_ms,loading:false}:m));
         }
         if(event==='error')throw new Error(p.message||'Request failed');
       };
@@ -313,8 +313,8 @@ export default function Home(){
                 {m.text?<RichAnswer text={m.text}/>:<div className="thinking"><i/><i/><i/> <span>{activity||'Researching evidence...'}</span></div>}
                 {m.citations&&m.citations.length>0&&<div className="inline-sources"><div className="inline-sources-label">SOURCE EVIDENCE · {m.citations.length}</div><div className="inline-sources-row">{m.citations.map(c=><a key={c.id} href={c.url} target="_blank" rel="noopener noreferrer"><span>{c.id}</span>{c.title.slice(0,55)}<ArrowUpRight size={13}/></a>)}</div></div>}
                 {m.role==='assistant'&&!m.loading&&m.reason&&<small className="diagnostic-line">{m.reason.replaceAll('_',' ')}</small>}
-                {m.activity&&m.activity.length>0&&<details className="research-diagnostics"><summary>Research activity</summary>{m.activity.map((a,i)=><p key={i}>{a.status}: {a.detail}</p>)}</details>}
-                {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}{m.fallback&&<span>Fallback used</span>}</div>}
+                {((m.activity&&m.activity.length>0)||m.timings)&&<details className="research-diagnostics"><summary>Research activity</summary>{m.timings&&<p>Retrieval {(m.timings.retrieval_ms/1000).toFixed(2)}s · Live lookup {(m.timings.live_search_ms/1000).toFixed(2)}s · Generation {(m.timings.generation_ms/1000).toFixed(2)}s</p>}{m.activity?.map((a,i)=><p key={i}>{a.status}: {a.detail}</p>)}</details>}
+                {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}{m.fallback&&<span>Fallback used</span>}{m.timings&&<span title={`Retrieval ${(m.timings.retrieval_ms/1000).toFixed(2)}s · Live lookup ${(m.timings.live_search_ms/1000).toFixed(2)}s · Generation ${(m.timings.generation_ms/1000).toFixed(2)}s`}>{(m.timings.total_ms/1000).toFixed(1)}s</span>}</div>}
               </div></div>)}
             </div>}
           </div>

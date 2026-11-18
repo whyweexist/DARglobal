@@ -21,7 +21,7 @@ ENABLE_SCRAPLING=true
 CRAWL_MAX_PAGES=50
 ```
 
-Use `SCRAPER_ENGINE=httpx` instead if you do not need Scrapling for DarGlobal. `WASALT_ENGINE=inherit` uses the global engine. `WASALT_ENGINE=httpx` or `scrapling` selects direct approved HTTP collection instead. An access refusal is not a reason to switch automatically to another access method. The provider is selected explicitly by the operator. No new Python dependency is needed for Apify (HTTPX is already present).
+Use `SCRAPER_ENGINE=httpx` instead if you do not need Scrapling for DarGlobal. `WASALT_ENGINE=inherit` uses the global engine. `WASALT_ENGINE=httpx` is now the default, independent of `SCRAPER_ENGINE`; `scrapling` explicitly selects the optional direct HTTP engine. To use Apify for a single authorized ingestion without making it the default, keep `WASALT_ENGINE=httpx`, use `APIFY_ENABLED=true` and set the token, then pass `--engine apify` to the Wasalt scraper. The stored records remain available to RAG regardless of the current engine. An access refusal is not a reason to switch automatically to another access method. The provider is selected explicitly by the operator. No new Python dependency is needed for Apify (HTTPX is already present).
 
 ## Native CLI
 

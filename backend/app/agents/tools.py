@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
 import httpx
@@ -16,6 +17,25 @@ from app.ingestion.wasalt_site import seed_urls, kind as wasalt_kind
 import re
 
 log = logging.getLogger(__name__)
+# Process-local negative access cache, not a cache of data or answers.
+_access_cooldowns: dict[str, tuple[float, str]] = {}
+
+
+def record_access_refusal(source: str, reason: str) -> None:
+    seconds = settings().source_access_cooldown_seconds
+    if seconds:
+        _access_cooldowns[source] = (time.monotonic() + seconds, reason)
+
+
+def access_cooldown(source: str) -> str | None:
+    entry = _access_cooldowns.get(source)
+    if not settings().source_access_cooldown_seconds or not entry:
+        return None
+    if time.monotonic() >= entry[0]:
+        _access_cooldowns.pop(source, None)
+        return None
+    return entry[1]
+
 
 @dataclass
 class SearchActivity:
@@ -70,6 +90,10 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                 activities.append(SearchActivity('apify_wasalt', 'completed' if count else report.status, report.detail, count))
                 budget -= 1
                 continue
+            refusal = access_cooldown(source)
+            if refusal:
+                activities.append(SearchActivity(name, 'access_cooldown', f'{source}: recent access refusal; {refusal}. Live request not repeated.'))
+                continue
             base = 'https://darglobal.co.uk' if source == 'darglobal' else 'https://wasalt.sa'
             entries = [DARGLOBAL_CATALOG] if source == 'darglobal' else seed_urls(query)
             entry = entries[0]
@@ -84,6 +108,10 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
 
             async def process(url):
                 nonlocal budget, count, source_budget, blocked
+                # Wait between actual same-source page requests, never after
+                # the final page when no further request will be dispatched.
+                if attempted:
+                    await asyncio.sleep(cfg.crawl_delay_seconds)
                 budget -= 1
                 source_budget -= 1
                 attempted.add(url)
@@ -108,8 +136,7 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                     activities.append(SearchActivity('fetch_official_source_page', 'access_restricted' if challenge else 'fetch_failed', failures[-1]))
                     if challenge or any(f'HTTP {code}' in failures[-1] for code in (401,403,429)):
                         blocked = True
-                if budget > 0 and source_budget > 0 and not blocked:
-                    await asyncio.sleep(cfg.crawl_delay_seconds)
+                        record_access_refusal(source, failures[-1])
 
             await process(entry)
             ranked = rank_links(query, links)
@@ -122,11 +149,13 @@ async def discover_and_ingest(query: str, sources: list[str], *, max_pages: int 
                 ranked += [u for u in entries[1:] if u not in ranked]
             if not ranked and budget > 0 and source_budget > 0 and not blocked and source == 'darglobal':
                 try:
+                    await asyncio.sleep(cfg.crawl_delay_seconds)
                     urls = await discover_sitemap(client, policy, base + '/sitemap.xml', source, 120)
                     links.update({u: '' for u in urls if eligible_link(source, u) and u not in links})
                     ranked = rank_links(query, links)
                 except ChallengeBlocked as exc:
                     blocked = True
+                    record_access_refusal(source, str(exc))
                     failures.append(f'{source}: {exc}')
                     activities.append(SearchActivity('discover_official_source_pages', 'access_restricted', failures[-1]))
             for url in ranked:

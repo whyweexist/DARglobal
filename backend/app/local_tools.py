@@ -59,6 +59,8 @@ async def chat_loop(model: str, source: str, question: str | None, allow_live_se
             continue
         result = await RAGOrchestrator().answer(user,model,sources,allow_live_search,history=history)
         print(f"\n{result['answer']}\n\nStatus: {result['status']} | Model: {result.get('model_used') or 'none'}")
+        if result.get('timings_ms'):
+            print('Timing: ' + ' | '.join(f'{key.removesuffix("_ms")}: {value/1000:.2f}s' for key,value in result['timings_ms'].items()))
         for ev in result['sources']:
             print(f"[{ev['id']}] {ev['title']}: {ev['url']}")
         for activity in result.get('tool_activity',[]):

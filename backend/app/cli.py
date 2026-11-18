@@ -66,6 +66,10 @@ def main():
                           "wasalt_engine": settings().effective_wasalt_engine,
                           "apify_configured": bool(settings().apify_enabled and settings().apify_token),
                           "apify_live_search": settings().apify_live_search,
+                          "agent_max_seconds": settings().agent_max_seconds,
+                          "llm_timeout_seconds": settings().llm_timeout_seconds,
+                          "llm_total_seconds": settings().llm_total_seconds,
+                          "embedding_cpu_threads": settings().embedding_cpu_threads,
                           "scrapling_installed": scrapling_available(),
                           "scrapling_version": version("scrapling") if scrapling_available() else None}))
     elif args.command == "check-ai":

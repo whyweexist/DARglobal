@@ -4,8 +4,9 @@ export type Source = { id: string; name: string; documents: number; engine?: str
 export type Citation = { id: string; title: string; source: string; url: string;
   fetched_at: string; excerpt: string };
 export type ToolActivity = { tool: string; status: string; detail: string; found?: number };
+export type Timings = { retrieval_ms: number; live_search_ms: number; generation_ms: number; total_ms: number };
 export type Message = { id: string; role: 'user' | 'assistant'; text: string;
-  citations?: Citation[]; status?: string; model?: string; activity?: ToolActivity[]; loading?: boolean; reason?: string; fallback?: boolean; query?: string };
+  citations?: Citation[]; status?: string; model?: string; activity?: ToolActivity[]; loading?: boolean; reason?: string; fallback?: boolean; query?: string; timings?: Timings };
 export type ChatResult = { answer?: string; sources: Citation[]; status: string; model_used?: string | null;
   fallback_used?: boolean; conversation_id: string; conversation_token: string;
-  retrieval_degraded?: string[]; tool_activity?: ToolActivity[]; reason?: string; retrieval_query?: string };
+  retrieval_degraded?: string[]; tool_activity?: ToolActivity[]; reason?: string; retrieval_query?: string; timings_ms?: Timings };

@@ -3,11 +3,15 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from sqlalchemy import bindparam
 from sqlalchemy import text
 from app.core.config import settings
 from app.db.session import engine, vector_loaded
 
 log = logging.getLogger(__name__)
+# Shared bounded pool, not one new pool per chat. Each branch opens its own DB connection.
+_BRANCH_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="rag-retrieval")
 STOPWORDS = {"darglobal", "wasalt", "real", "estate", "development", "developments", "documented", "verified", "source", "sources", "current", "give", "list", "all", "these", "those", "their", "them", "its", "then", "also", "instead", "most", "about", "the", "a", "an", "in", "on", "for", "of", "and", "or", "to", "are", "is", "what", "which", "show", "me", "tell", "about", "has", "have", "does", "with", "please", "where", "can", "find", "property", "properties", "project", "projects", "latest", "information", "available", "details"}
 
 
@@ -68,16 +72,14 @@ def semantic_search(query: str, source_filter: list[str] | None = None, limit: i
     with engine().connect() as conn:
         if not conn.execute(text("SELECT rowid FROM chunk_vectors LIMIT 1")).first():
             return []
-    from app.rag.embeddings import encode, serialize
-    values = encode([query])
-    if not values:
-        return []
+    from app.rag.embeddings import query_embedding
+    vector = query_embedding(query)
     sources = source_filter or ["darglobal", "wasalt"]
     # vec0 expects an explicit k and accepts the binary float32 query embedding.
     with engine().connect() as conn:
         nearest = conn.execute(text("""SELECT rowid, distance FROM chunk_vectors
             WHERE embedding MATCH :v AND k = :k ORDER BY distance"""),
-            {"v": serialize(values[0]), "k": limit * 3}).all()
+            {"v": vector, "k": limit * 3}).all()
         if not nearest:
             return []
         ids = [r.rowid for r in nearest]
@@ -144,10 +146,21 @@ def structured_search(query: str, source_filter: list[str] | None = None, limit:
             overlap=sum(t.rstrip('s') in names for t in tokens)
             if overlap or clauses: ranked.append((overlap,row))
         ranked.sort(key=lambda x:x[0],reverse=True)
-        results=[]
-        for score,row in ranked[:limit]:
-            chunk=conn.execute(text('SELECT c.id,c.text,c.heading,d.fetched_at FROM chunks c JOIN documents d ON c.document_id=d.id WHERE d.url=:url ORDER BY c.ordinal LIMIT 1'),{'url':row.url}).first()
-            if chunk: results.append(Evidence(chunk.id,row.title,row.source_id,row.url,chunk.text,str(chunk.fetched_at),score,chunk.heading))
+        selected = ranked[:limit]
+        if not selected:
+            return []
+        # Resolve the first chunk of each listing in a single indexed query.
+        chunks = conn.execute(text("""SELECT d.url,c.id,c.text,c.heading,d.fetched_at
+            FROM documents d JOIN chunks c ON c.id=(SELECT c2.id FROM chunks c2
+              WHERE c2.document_id=d.id ORDER BY c2.ordinal,c2.id LIMIT 1)
+            WHERE d.url IN :urls""").bindparams(bindparam("urls", expanding=True)),
+            {"urls": [row.url for _,row in selected]}).all()
+        by_url = {row.url: row for row in chunks}
+        results = []
+        for score,row in selected:
+            chunk = by_url.get(row.url)
+            if chunk:
+                results.append(Evidence(chunk.id,row.title,row.source_id,row.url,chunk.text,str(chunk.fetched_at),score,chunk.heading))
     return results
 
 
@@ -164,11 +177,15 @@ class HybridRetriever:
         top_k = top_k or settings().retrieval_top_k
         results = []
         degraded = []
-        for label, fn, weight in [("lexical", lexical_search, 1.2),
-                                   ("semantic", semantic_search, 1.0),
-                                   ("structured", structured_search, 0.8)]:
+        branches = [("lexical", lexical_search, 1.2),
+                    ("semantic", semantic_search, 1.0),
+                    ("structured", structured_search, 0.8)]
+        futures = [(label, _BRANCH_POOL.submit(fn, query, sources, limit=20), weight)
+                   for label, fn, weight in branches]
+        # Merge in original branch order for deterministic tie-breaking.
+        for label, future, weight in futures:
             try:
-                results.append((fn(query, sources, limit=20), weight))
+                results.append((future.result(), weight))
             except Exception as exc:
                 degraded.append(label)
                 log.warning("retriever degraded: branch=%s error=%s", label, type(exc).__name__)

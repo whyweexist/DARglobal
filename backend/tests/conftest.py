@@ -11,7 +11,10 @@ def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setenv('WASALT_AUTHORIZED', 'false')
     settings.cache_clear()
     engine.cache_clear()
+    from app.agents.tools import _access_cooldowns
+    _access_cooldowns.clear()
     yield
+    _access_cooldowns.clear()
     engine().dispose()
     engine.cache_clear()
     settings.cache_clear()

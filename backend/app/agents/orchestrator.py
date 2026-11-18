@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from app.core.config import settings
 from app.rag.retrieval import HybridRetriever
@@ -19,6 +20,8 @@ class RAGOrchestrator:
     async def answer(self, question: str, model: str, sources: list[str], allow_live_search: bool = True,
                      on_status=None, history: list[dict] | None = None) -> dict:
         cfg = settings()
+        started = time.perf_counter()
+        timings = {"retrieval_ms": 0, "live_search_ms": 0, "generation_ms": 0}
         plan = plan_query(question, history)
         # Respect an explicitly named source if it is enabled by the UI.
         named = [source for source in sources if source in plan.search_query.casefold()]
@@ -34,14 +37,19 @@ class RAGOrchestrator:
         async def retrieve():
             nonlocal hits, degraded
             await status('retrieving','Searching indexed evidence for the current question')
-            hits, issues = await asyncio.to_thread(self.retriever.retrieve,plan.search_query,sources)
-            degraded = sorted(set(degraded+issues))
+            t = time.perf_counter()
+            try:
+                hits, issues = await asyncio.to_thread(self.retriever.retrieve,plan.search_query,sources)
+                degraded = sorted(set(degraded+issues))
+            finally:
+                timings['retrieval_ms'] += round((time.perf_counter()-t)*1000)
         async def live():
             nonlocal activities, discovered
             if discovered or not allow_live_search or not cfg.rag_live_search:
                 return False
             discovered = True
             await status('source_search','Checking permitted official sources for missing information')
+            t = time.perf_counter()
             try:
                 activities = await asyncio.wait_for(discover_and_ingest(plan.search_query,sources),cfg.agent_max_seconds)
             except TimeoutError:
@@ -49,8 +57,24 @@ class RAGOrchestrator:
             except Exception as exc:
                 log.warning('Live discovery failed: %s',type(exc).__name__)
                 activities = [{'tool':'discover_official_source_pages','status':'unavailable','detail':type(exc).__name__}]
-            await retrieve()
+            finally:
+                timings['live_search_ms'] += round((time.perf_counter()-t)*1000)
+            # Explicitly skipped/blocked lookups cannot add any evidence. A
+            # timeout may have committed partial results, so re-query in that case.
+            skipped = {'access_cooldown', 'permission_required', 'disabled', 'skipped'}
+            if not activities or any((a.status if hasattr(a,'status') else a.get('status')) not in skipped for a in activities):
+                await retrieve()
             return True
+        async def generate():
+            t = time.perf_counter()
+            try:
+                return await grounded_answer(plan.question,hits,model,plan.history)
+            finally:
+                timings['generation_ms'] += round((time.perf_counter()-t)*1000)
+
+        def evidence_signature():
+            return tuple((e.chunk_id, e.url, e.text, e.fetched_at) for e in hits)
+
         try:
             async with asyncio.timeout(cfg.chat_deadline_seconds):
                 await retrieve()
@@ -65,17 +89,21 @@ class RAGOrchestrator:
                     await status('generating','Generating and validating a new answer with OpenRouter')
                     # Keep current wording as the question; the contextual query is
                     # only for retrieval. Prior assistant text is marked untrusted.
-                    result = await grounded_answer(plan.question,hits,model,plan.history)
+                    result = await generate()
+                    previous = evidence_signature()
                     if result['status']=='insufficient_evidence' and await live():
-                        if hits and has_requested_fields(plan.fields,hits):
-                            result = await grounded_answer(plan.question,hits,model,plan.history)
+                        if hits and has_requested_fields(plan.fields,hits) and previous != evidence_signature():
+                            await status('generating','New source evidence found; validating an updated answer')
+                            result = await generate()
         except TimeoutError:
             result = evidence_only(hits,'request_deadline')
         if result['status'] in {'no_evidence','insufficient_evidence'} and activities:
             statuses = {a.status if hasattr(a,'status') else a.get('status') for a in activities}
             if not statuses.intersection({'completed'}):
                 result['answer'] += ' Official-source lookup returned no usable additional evidence or was unavailable; see search activity.'
-        result.update({'model_requested':model,'retrieval_mode':'hybrid_plus_live' if discovered else 'hybrid',
+        timings['total_ms'] = round((time.perf_counter()-started)*1000)
+        log.info('RAG timing: %s status=%s', timings, result['status'])
+        result.update({'timings_ms':timings,'model_requested':model,'retrieval_mode':'hybrid_plus_live' if discovered else 'hybrid',
                        'retrieval_query':plan.search_query,'retrieval_degraded':degraded,
                        'tool_activity':[a.public() if hasattr(a,'public') else a for a in activities],
                        'observed_at':datetime.now(timezone.utc).isoformat()})

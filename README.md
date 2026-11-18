@@ -299,4 +299,8 @@ If chat returns `no_evidence`, run `make local-doctor`, `make local-scrape-dargl
 
 ## Authorized Wasalt provider (Apify)
 
-See [docs/apify.md](docs/apify.md) for the optional Apify provider, exact configuration, dry-run/ingestion commands, billing controls, data contract and limitations. It is integrated into CLI, normal ingestion, the worker and opt-in live RAG search. The existing HTTPX/Scrapling paths are unchanged as selectable alternatives. The research interface now shows full example questions, selected ingestion engine, source observation dates, and a dedicated conversation scroll region with a Latest message control.
+See [docs/apify.md](docs/apify.md) for the optional Apify provider, exact configuration, dry-run/ingestion commands, billing controls, data contract and limitations. It is integrated into CLI, normal ingestion, the worker and opt-in live RAG search. HTTPX is the default Wasalt provider independently of the DarGlobal engine; Scrapling and Apify remain explicit alternatives. The research interface now shows full example questions, selected ingestion engine, source observation dates, and a dedicated conversation scroll region with a Latest message control.
+
+## HTTPX-first Wasalt and latency tuning
+
+This release defaults Wasalt to HTTPX, with Apify off unless explicitly enabled. Existing `.env` settings override defaults: set `WASALT_ENGINE=httpx`, `APIFY_ENABLED=false`, and `APIFY_LIVE_SEARCH=false` in your actual environment file if upgrading from the Apify edition. Keep the existing authorization, API key, SQLite file and model cache. Optional authorized Apify ingestion can still be selected by an explicit CLI flag. No automatic switch to Apify following access refusal. See [performance guide](docs/performance.md) for commands, timing breakdown, limits, and trade-offs.
