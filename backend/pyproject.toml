@@ -1,0 +1,32 @@
+[project]
+name = "estate-intelligence"
+version = "1.0.0"
+description = "Source-grounded real-estate RAG research platform"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "pydantic-settings>=2.7,<3",
+  "sqlalchemy>=2.0,<3", "alembic>=1.14,<2", "httpx>=0.28,<1",
+  "beautifulsoup4>=4.12,<5", "lxml>=5.3,<7", "tiktoken>=0.9,<1",
+  "sqlite-vec>=0.1.6,<0.2", "sentence-transformers>=3.4,<6",
+  "numpy>=1.26,<3", "tenacity>=9,<10", "orjson>=3.10,<4"
+]
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "pytest-cov>=6,<8", "ruff>=0.11,<1", "mypy>=1.15,<2"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+[tool.ruff]
+line-length = 105
+target-version = "py312"
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["S101", "S311"]
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

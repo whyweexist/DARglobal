@@ -1,0 +1,56 @@
+name: estate-intelligence
+x-api-image: &api-image
+  build:
+    context: .
+    dockerfile: Dockerfile.api
+  image: estate-intelligence-api:local
+x-env: &backend-env
+  env_file:
+    - .env
+  environment:
+    DATABASE_URL: sqlite:////data/estate.db
+    HF_HOME: /home/estate/.cache/huggingface
+x-volumes: &backend-volumes
+  volumes:
+    - estate_data:/data
+    - hf_cache:/home/estate/.cache/huggingface
+services:
+  init:
+    <<: [*api-image, *backend-env, *backend-volumes]
+    command: ["sh","-c","alembic upgrade head && python -m app.cli bootstrap"]
+    restart: "no"
+  api:
+    <<: [*api-image, *backend-env, *backend-volumes]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=5).read()"]
+      interval: 15s
+      timeout: 7s
+      retries: 5
+      start_period: 25s
+    restart: unless-stopped
+  worker:
+    <<: [*api-image, *backend-env, *backend-volumes]
+    command: ["python","-m","app.worker"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        API_URL_INTERNAL: http://api:8000
+    image: estate-intelligence-web:local
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+volumes:
+  estate_data: {}
+  hf_cache: {}

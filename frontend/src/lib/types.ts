@@ -1,0 +1,11 @@
+export type Model = { id: string; name: string; free: boolean; tools: boolean; context_length: number | null };
+export type Source = { id: string; name: string; documents: number; permitted: boolean;
+  permission_note: string; last_success: string | null; last_run_status: string };
+export type Citation = { id: string; title: string; source: string; url: string;
+  fetched_at: string; excerpt: string };
+export type ToolActivity = { tool: string; status: string; detail: string; found?: number };
+export type Message = { id: string; role: 'user' | 'assistant'; text: string;
+  citations?: Citation[]; status?: string; model?: string; activity?: ToolActivity[]; loading?: boolean };
+export type ChatResult = { sources: Citation[]; status: string; model_used?: string | null;
+  fallback_used?: boolean; conversation_id: string; conversation_token: string;
+  retrieval_degraded?: string[]; tool_activity?: ToolActivity[]; reason?: string };

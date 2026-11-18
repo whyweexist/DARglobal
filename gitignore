@@ -1,0 +1,17 @@
+.env
+.env.production
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+node_modules/
+.next/
+coverage/
+*.pyc
+.DS_Store
+models-cache/
+backups/
