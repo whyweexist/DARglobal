@@ -13,7 +13,7 @@ jobs:
         run: |
           pip install uv
           cd backend
-          uv pip install --system -e '.[dev]'
+          uv pip install --system --torch-backend cpu -e '.[dev]'
       - name: Tests
         env:
           DATABASE_URL: sqlite:////tmp/estate-ci.db

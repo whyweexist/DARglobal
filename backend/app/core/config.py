@@ -1,5 +1,6 @@
 """Typed configuration. Never import credentials into client-side code."""
 from functools import lru_cache
+from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     app_domain: str = "localhost"
     api_rate_limit_per_minute: int = Field(default=12, ge=1, le=1000)
     scrape_on_boot: bool = True
+    scraper_engine: Literal["httpx", "scrapling"] = "httpx"
     scrape_refresh_hours: int = Field(default=24, ge=1)
     crawl_max_pages: int = Field(default=15, ge=1, le=250)
     crawl_delay_seconds: float = Field(default=2, ge=0.5)
@@ -32,7 +34,8 @@ class Settings(BaseSettings):
     rag_live_search: bool = True
     agent_max_live_pages: int = Field(default=3, ge=0, le=15)
     agent_max_seconds: int = Field(default=22, ge=2, le=120)
-    llm_max_tokens: int = Field(default=650, ge=100, le=4000)
+    chat_deadline_seconds: int = Field(default=100, ge=15, le=240)
+    llm_max_tokens: int = Field(default=1200, ge=100, le=4000)
     llm_timeout_seconds: int = Field(default=40, ge=5)
     model_catalog_ttl_seconds: int = Field(default=3600, ge=60)
 

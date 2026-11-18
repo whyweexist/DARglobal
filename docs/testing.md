@@ -37,3 +37,12 @@ Measure Recall@5, citation validity, unsupported-number rejection, correct abste
 ## Important verification limitations
 
 The current test container/image build and Next.js compile require network installations and were not externally executed by the original archive generator. Run them in Codespaces before reporting an assessor-facing production pass. Tests must be rerun after source-specific page selectors are adapted to live authorized pages.
+
+## Chat regressions and native workflow
+
+The backend regression suite includes test-only isolated SQLite records and mocked
+provider responses to verify distinct query retrieval, duplicate suppression,
+requested-field gating, numeric citation checks, conversation isolation and
+continuation, explicit provider failures, and local data exports. No test fixture
+is seeded into the runtime database. `make local-check-ai` is intentionally a
+separate live check requiring a real OpenRouter key and network access.

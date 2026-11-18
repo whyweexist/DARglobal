@@ -50,7 +50,7 @@ async def defensive_headers(request: Request, call_next):
     return response
 
 
-def get_conversation(body: ChatRequest) -> tuple[str, str, str | None]:
+def get_conversation(body: ChatRequest) -> tuple[str, str, list[dict]]:
     """Persist minimal messages under a high-entropy per-conversation bearer token."""
     token = body.conversation_token
     with session_factory()() as db:
@@ -58,14 +58,14 @@ def get_conversation(body: ChatRequest) -> tuple[str, str, str | None]:
             convo = db.get(Conversation, body.conversation_id)
             if not convo or not token or not secrets.compare_digest(convo.token_hash, hashlib.sha256(token.encode()).hexdigest()):
                 raise HTTPException(403, "Conversation credentials invalid")
-            prev = db.scalars(select(Message).where(Message.conversation_id == convo.id, Message.role == "user")
-                              .order_by(Message.id.desc()).limit(1)).first()
-            previous = prev.text if prev else None
-            return convo.id, token, previous
+            recent = db.scalars(select(Message).where(Message.conversation_id == convo.id)
+                                .order_by(Message.id.desc()).limit(12)).all()
+            history = [{"role": m.role, "content": m.text} for m in reversed(recent)]
+            return convo.id, token, history
         new_id, new_token = str(uuid.uuid4()), secrets.token_urlsafe(32)
         db.add(Conversation(id=new_id, token_hash=hashlib.sha256(new_token.encode()).hexdigest()))
         db.commit()
-        return new_id, new_token, None
+        return new_id, new_token, []
 
 
 def save_exchange(conversation_id: str, user: str, assistant: str):
@@ -75,22 +75,16 @@ def save_exchange(conversation_id: str, user: str, assistant: str):
         db.commit()
 
 
-def contextualize(message: str, previous: str | None) -> str:
-    if previous and any(x in message.casefold().split() for x in ("it", "its", "that", "those", "their", "there")):
-        return f"Earlier subject: {previous[:260]}\nCurrent question: {message}"
-    return message
-
-
 async def run_chat(body: ChatRequest, request: Request, on_status=None) -> dict:
     check_rate(request)
     try:
         await registry.validate(body.model)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    cid, ctoken, previous = get_conversation(body)
+    cid, ctoken, history = get_conversation(body)
     try:
-        result = await RAGOrchestrator().answer(contextualize(body.message, previous), body.model,
-                                                 sorted(set(body.source_filter)), body.allow_live_search, on_status)
+        result = await RAGOrchestrator().answer(body.message, body.model,
+                                                 sorted(set(body.source_filter)), body.allow_live_search, on_status, history)
     except Exception as exc:
         log.exception("Chat orchestration failed")
         raise HTTPException(503, "Research service unavailable; retry later") from exc
@@ -125,7 +119,11 @@ async def chat_stream(body: ChatRequest, request: Request):
         task = asyncio.create_task(perform())
         try:
             while True:
-                item = await q.get()
+                try:
+                    item = await asyncio.wait_for(q.get(), 10)
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
                 if item is None:
                     break
                 yield sse("activity", item)
@@ -148,8 +146,8 @@ async def chat_stream(body: ChatRequest, request: Request):
 
 
 @app.get("/api/v1/models")
-async def models():
-    return await registry.options()
+async def models(refresh: bool = False):
+    return await registry.options(refresh=refresh)
 
 
 @app.get("/api/v1/sources")

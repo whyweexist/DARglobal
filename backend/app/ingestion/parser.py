@@ -29,10 +29,11 @@ def parse_html(html: str, source: str) -> ExtractedPage:
     sections: list[tuple[str, str]] = []
     current_heading = title
     current: list[str] = []
+    seen_blocks: set[str] = set()
 
     def flush():
         if current:
-            value = re.sub(r"\s+", " ", " ".join(current)).strip()
+            value = "\n\n".join(current).strip()
             if len(value) >= 45 and value not in (s[1] for s in sections):
                 sections.append((current_heading, value))
             current.clear()
@@ -48,8 +49,10 @@ def parse_html(html: str, source: str) -> ExtractedPage:
             if node.find_parent(["li", "p", "td", "dd"]):
                 continue
             text = node.get_text(" ", strip=True)
-            if 12 <= len(text) <= 2500:
-                current.append(text)
+            normalized = re.sub(r"\s+", " ", text).strip()
+            if 12 <= len(normalized) <= 2500 and normalized.casefold() not in seen_blocks:
+                current.append(normalized)
+                seen_blocks.add(normalized.casefold())
     flush()
     facts = {"properties": properties[:15]} if properties else {}
     return ExtractedPage(title=title or "Untitled page", sections=sections, language=lang, facts=facts)

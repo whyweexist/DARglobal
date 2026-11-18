@@ -50,7 +50,7 @@ function ArchitectureGraphic(){
 
 function RichAnswer({text}:{text:string}){
   // Plain text rendering eliminates generated HTML and XSS exposure.
-  return <div className="answer-copy">{text.split(/(\[E\d+\])/g).map((part,i)=><span key={i} className={/^\[E\d+\]$/.test(part)?'inline-ref':''}>{part}</span>)}</div>;
+  return <div className="answer-copy">{text.split(/(\[E\d+\]|\*\*[^*]+\*\*)/g).map((part,i)=>part.startsWith('**')&&part.endsWith('**')?<strong key={i}>{part.slice(2,-2)}</strong>:<span key={i} className={/^\[E\d+\]$/.test(part)?'inline-ref':''}>{part}</span>)}</div>;
 }
 
 export default function Home(){
@@ -69,6 +69,9 @@ export default function Home(){
   const [liveSearch,setLiveSearch]=useState(true);
   const [online,setOnline]=useState<boolean|null>(null);
   const [aiReady,setAiReady]=useState(false);
+  const [catalogOnline,setCatalogOnline]=useState<boolean|null>(null);
+  const [catalogLoading,setCatalogLoading]=useState(false);
+  const threadVersion=useRef(0);
   const [conv,setConv]=useState<{id:string,token:string}|null>(null);
   const [selection,setSelection]=useState<number>(-1);
   const [history,setHistory]=useState<{id:string;token:string;title:string;updatedAt:number}[]>([]);
@@ -81,16 +84,26 @@ export default function Home(){
     try {const raw=localStorage.getItem('estate:history');if(raw)setHistory(JSON.parse(raw));}
     catch {setHistory([]);}
   },[]);
+  const refreshModels=useCallback(async(refresh=false)=>{
+    setCatalogLoading(true);
+    try{
+      const res=await fetch(`/api/v1/models${refresh?'?refresh=true':''}`,{cache:'no-store',signal:AbortSignal.timeout(18000)});
+      if(!res.ok)throw new Error('Model catalogue unavailable');
+      const data=await res.json();
+      if(!Array.isArray(data.models))throw new Error('Invalid model catalog');
+      setModels(data.models);setAiReady(Boolean(data.configured));setCatalogOnline(Boolean(data.catalog_online));
+      setModel(old=>data.models.some((m:Model)=>m.id===old)?old:'openrouter/free');
+    }catch{setCatalogOnline(false)}finally{setCatalogLoading(false)}
+  },[]);
+  useEffect(()=>{void refreshModels()},[refreshModels]);
   useEffect(()=>{
     let active=true;
     const load=async()=>{
-      const [a,b,c]=await Promise.allSettled([
-        fetch('/api/v1/models').then(r=>r.json()),
+      const [b,c]=await Promise.allSettled([
         fetch('/api/v1/sources').then(r=>r.json()),
         fetch('/api/v1/health/ready').then(r=>r.json())
       ]);
       if(!active)return;
-      if(a.status==='fulfilled'&&Array.isArray(a.value.models)){setModels(a.value.models);setAiReady(Boolean(a.value.configured));}
       if(b.status==='fulfilled'&&Array.isArray(b.value.sources))setSources(b.value.sources);
       setOnline(c.status==='fulfilled'&&c.value.status==='ready');
     };load().catch(()=>setOnline(false));return()=>{active=false;};
@@ -99,20 +112,22 @@ export default function Home(){
   useEffect(()=>{if(toast){const id=setTimeout(()=>setToast(''),2500);return()=>clearTimeout(id)}},[toast]);
 
   const send=useCallback(async(custom?:string)=>{
-    const question=(custom??input).trim();if(!question||busy||question.length<3)return;
-    setInput('');setActivity('Researching verified records');setBusy(true);setSelection(-1);
+    const question=(custom??input).trim();if(!question||busy||abortRef.current||question.length<3)return;
+    threadVersion.current++;setInput('');setActivity('Researching verified records');setBusy(true);setSelection(-1);
     const pending:Message={id:uid(),role:'assistant',text:'',loading:true};
     setMessages(prev=>[...prev,{id:uid(),role:'user',text:question},pending]);
     const controller=new AbortController();abortRef.current=controller;
     const body={message:question,model,source_filter:sourceFilter,conversation_id:conv?.id||null,
       conversation_token:conv?.token||null,allow_live_search:liveSearch};
-    let accumulated='';
+    let accumulated='';let completed=false;
+    const timer=setTimeout(()=>controller.abort(),125000);
     try{
       const res=await fetch('/api/v1/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body),signal:controller.signal});
       if(!res.ok||!res.body)throw new Error(`Service error (${res.status})`);
       const reader=res.body.getReader();const dec=new TextDecoder();let buffer='';
       const process=(block:string)=>{
+        if(abortRef.current!==controller||controller.signal.aborted)return;
         const lines=block.split('\n');let event='message',data='';
         for(const line of lines){if(line.startsWith('event:'))event=line.slice(6).trim();if(line.startsWith('data:'))data+=line.slice(5).trim();}
         if(!data)return;
@@ -123,7 +138,7 @@ export default function Home(){
           setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:accumulated,loading:true}:m));
         }
         if(event==='done'){
-          const result=p as ChatResult;setActivity('');
+          const result=p as ChatResult;completed=true;setActivity('');
           if(result.conversation_id&&result.conversation_token){
             setConv({id:result.conversation_id,token:result.conversation_token});
             const newThread={id:result.conversation_id,token:result.conversation_token,title:question.slice(0,64),updatedAt:Date.now()};
@@ -135,27 +150,32 @@ export default function Home(){
             });
           }
           setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:accumulated,citations:result.sources||[],
-            status:result.status,model:result.model_used||undefined,activity:result.tool_activity||[],loading:false}:m));
+            status:result.status,model:result.model_used||undefined,activity:result.tool_activity||[],reason:result.reason,fallback:result.fallback_used,query:result.retrieval_query,loading:false}:m));
         }
         if(event==='error')throw new Error(p.message||'Request failed');
       };
       while(true){const {done,value}=await reader.read();if(done)break;buffer+=dec.decode(value,{stream:true});
         let pos;while((pos=buffer.indexOf('\n\n'))!==-1){const b=buffer.slice(0,pos);buffer=buffer.slice(pos+2);process(b);}}
       if(buffer.trim())process(buffer);
+      if(!completed && !controller.signal.aborted)throw new Error('Connection closed before the answer completed. Please retry.');
     }catch(err){
-      const msg=err instanceof Error?err.message:'Unknown request failure';
+      if(abortRef.current!==controller)return;
+      const msg=controller.signal.aborted?'Request cancelled or timed out':err instanceof Error?err.message:'Unknown request failure';
       setMessages(prev=>prev.map(m=>m.id===pending.id?{...m,text:`Research request failed: ${msg}`,status:'error',loading:false}:m));
-    }finally{setBusy(false);setActivity('');abortRef.current=null;inputRef.current?.focus();}
+    }finally{clearTimeout(timer);if(abortRef.current===controller){setBusy(false);setActivity('');abortRef.current=null;inputRef.current?.focus();
+      void fetch('/api/v1/sources',{cache:'no-store'}).then(r=>r.json()).then(d=>{if(Array.isArray(d.sources))setSources(d.sources)}).catch(()=>{});}}
   },[busy,conv,input,liveSearch,model,sourceFilter]);
 
-  const reset=()=>{abortRef.current?.abort();setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);};
+  const reset=()=>{threadVersion.current++;abortRef.current?.abort();abortRef.current=null;setBusy(false);setMessages([]);setConv(null);setActivity('');setInput('');setMobileMenu(false);};
   const openThread=async(thread:{id:string;token:string;title:string;updatedAt:number})=>{
     if(busy)return;
+    const version=++threadVersion.current;
     try{
       const resp=await fetch(`/api/v1/conversations/${encodeURIComponent(thread.id)}`,{
         headers:{'X-Conversation-Token':thread.token}});
       if(!resp.ok)throw new Error('Conversation is no longer accessible');
       const doc=await resp.json();
+      if(version!==threadVersion.current||abortRef.current)return;
       setMessages((doc.messages||[]).map((m:{role:'user'|'assistant';text:string})=>({id:uid(),role:m.role,text:m.text})));
       setConv({id:thread.id,token:thread.token});setMobileMenu(false);
     }catch{setToast('Could not retrieve this conversation');}
@@ -167,7 +187,7 @@ export default function Home(){
   };
   const toggleSource=(s:string)=>setSourceFilter(prev=>prev.includes(s)?(prev.length>1?prev.filter(x=>x!==s):prev):[...prev,s]);
   const docCount=sources.reduce((a,s)=>a+s.documents,0);
-  const citations=messages.filter(x=>x.role==='assistant').flatMap(x=>x.citations||[]);
+  const citations=messages.filter(x=>x.role==='assistant').at(-1)?.citations||[];
   const latestSources=Array.from(new Map<string, import('@/lib/types').Citation>(citations.map(x=>[x.url,x] as [string,import('@/lib/types').Citation])).values()).slice(-7).reverse();
   const filteredModels=models.filter(m=>m.name.toLowerCase().includes(modelQuery.toLowerCase())||m.id.toLowerCase().includes(modelQuery.toLowerCase()));
   const copy=(text:string)=>navigator.clipboard.writeText(text).then(()=>setToast('Copied to clipboard')).catch(()=>setToast('Clipboard unavailable'));
@@ -232,15 +252,18 @@ export default function Home(){
               <div className="message-content"><div className="message-meta">{m.role==='user'?'YOUR QUESTION':'ESTATE / INTELLIGENCE'}{m.loading&&<span className="status-tag"><LoaderCircle size={12} className="spin"/> PROCESSING</span>}{m.status&&<span className="result-tag">{m.status.replace(/_/g,' ').toUpperCase()}</span>}</div>
                 {m.text?<RichAnswer text={m.text}/>:<div className="thinking"><i/><i/><i/> <span>{activity||'Researching evidence...'}</span></div>}
                 {m.citations&&m.citations.length>0&&<div className="inline-sources"><div className="inline-sources-label">SOURCE EVIDENCE · {m.citations.length}</div><div className="inline-sources-row">{m.citations.map(c=><a key={c.id} href={c.url} target="_blank" rel="noopener noreferrer"><span>{c.id}</span>{c.title.slice(0,55)}<ArrowUpRight size={13}/></a>)}</div></div>}
-                {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}</div>}
+                {m.role==='assistant'&&!m.loading&&m.reason&&<small className="diagnostic-line">{m.reason.replaceAll('_',' ')}</small>}
+                {m.activity&&m.activity.length>0&&<details className="research-diagnostics"><summary>Research activity</summary>{m.activity.map((a,i)=><p key={i}>{a.status}: {a.detail}</p>)}</details>}
+                {m.role==='assistant'&&!m.loading&&<div className="message-actions"><button onClick={()=>copy(m.text)}><Copy size={13}/> Copy</button>{m.model&&<span><Cpu size={12}/>{m.model}</span>}{m.fallback&&<span>Fallback used</span>}</div>}
               </div></div>)}
             <div ref={bottomRef}/></div>}
           <div className="composer-wrap"><div className="composer"><div className="composer-head"><div className="model-control">
                 <button className={`model-trigger ${modelOpen?'selected':''}`} onClick={()=>setModelOpen(v=>!v)} aria-expanded={modelOpen}><span className="model-orb"><Sparkles size={14}/></span><span className="model-verb">MODEL</span><strong>{models.find(m=>m.id===model)?.name||'Auto · Free router'}</strong><ChevronDown size={14}/></button>
-                {modelOpen&&<div className="model-popover"><input value={modelQuery} onChange={e=>setModelQuery(e.target.value)} placeholder="Search free models..." autoFocus/><div className="model-results">{filteredModels.slice(0,70).map(m=><button key={m.id} className={m.id===model?'current':''} onClick={()=>{setModel(m.id);setModelOpen(false);setModelQuery('')}}><span><strong>{m.name}</strong><small>{m.id}</small></span><span className="model-badges">FREE {m.tools?'· TOOLS':''}</span></button>)}{!filteredModels.length&&<span className="model-empty">No available matching models</span>}</div></div>}
+                {modelOpen&&<div className="model-popover"><input value={modelQuery} onChange={e=>setModelQuery(e.target.value)} placeholder="Search free models..." autoFocus/><div className="catalog-status"><span>{catalogLoading?'Refreshing…':catalogOnline?`${models.length-1} selectable free models`:'Catalogue unavailable · auto router only or cached models'}</span><button type="button" disabled={catalogLoading} onClick={()=>refreshModels(true)}>Refresh</button></div><div className="model-results">{filteredModels.slice(0,70).map(m=><button key={m.id} className={m.id===model?'current':''} onClick={()=>{setModel(m.id);setModelOpen(false);setModelQuery('')}}><span><strong>{m.name}</strong><small>{m.id}</small></span><span className="model-badges">FREE {m.tools?'· TOOLS':''}</span></button>)}{!filteredModels.length&&<span className="model-empty">No available matching models</span>}</div></div>}
                 </div><span className="composer-mode"><CircleDot size={13}/> VERIFIED SOURCES ONLY</span></div>
+              {!aiReady&&<div className="diagnostic-line">OpenRouter key not configured or not yet checked. Configure the backend before AI generation.</div>}
               <textarea ref={inputRef} rows={2} value={input} disabled={busy} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}}} maxLength={1500} placeholder="Ask anything about properties, locations, developments..." aria-label="Ask a real estate research question"/>
-              <div className="composer-foot"><span><kbd>↵</kbd> to send <b>·</b> <kbd>shift ↵</kbd> for new line</span><div className="composer-foot-right"><span>{input.length}/1500</span><button onClick={()=>send()} disabled={busy||input.trim().length<3} className="submit-btn" title="Submit question">{busy?<LoaderCircle className="spin" size={18}/>:<ArrowUp size={19}/>}</button></div></div>
+              <div className="composer-foot"><span><kbd>↵</kbd> to send <b>·</b> <kbd>shift ↵</kbd> for new line</span><div className="composer-foot-right"><span>{input.length}/1500</span><button onClick={()=>busy?abortRef.current?.abort():send()} disabled={!busy&&input.trim().length<3} className="submit-btn" title={busy?"Stop generating":"Submit question"} aria-label={busy?"Stop generating":"Submit question"}>{busy?<X size={18}/>:<ArrowUp size={19}/>}</button></div></div>
             </div><div className="composer-disclaimer"><ShieldCheck size={12}/> Responses are research aids. Verify financial decisions with official sources.</div></div>
         </section>
         {rightOpen&&<aside className="evidence-panel"><div className="evidence-top"><span>RESEARCH CONTEXT</span><span className="panel-count">02 / 02</span></div>
@@ -250,7 +273,7 @@ export default function Home(){
           <div className="connection-list">{(['darglobal','wasalt'] as const).map(id=>{const s=sources.find(x=>x.id===id);return <div className="connection-card" key={id}><div className="conn-symbol"><Globe2 size={17}/></div><div className="conn-data"><strong>{sourceName(id)}</strong><small>{s?.documents??0} indexed documents</small><span className={s?.permitted?'conn-status indexed':'conn-status restricted'}>{s?.permitted?'PERMITTED':'RESTRICTED / PENDING'}</span></div><a target="_blank" rel="noopener noreferrer" href={id==='darglobal'?'https://darglobal.co.uk/':'https://wasalt.sa/'} aria-label={`Open ${id}`}><ArrowUpRight size={16}/></a></div>})}</div>
           <div className="evidence-divider"/>
           <div className="panel-heading">EVIDENCE LOG <span>{latestSources.length.toString().padStart(2,'0')}</span></div>
-          {latestSources.length? <div className="evidence-log">{latestSources.map((s,i)=><a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="evidence-item"><span className="evidence-id">{s.id}</span><span><strong>{s.title}</strong><small>{sourceName(s.source)} · source record</small></span><ExternalLink size={13}/></a>)}</div>:<div className="empty-evidence"><div className="empty-radar"><span/><span/><span/><CircleDot size={19}/></div><strong>Awaiting first discovery</strong><p>Verified citations and source signals will appear here as you research.</p></div>}
+          {latestSources.length? <div className="evidence-log">{latestSources.map((s,i)=><a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="evidence-item"><span className="evidence-id">{s.id}</span><span><strong>{s.title}</strong><small>{sourceName(s.source)} · source record</small><small>{s.excerpt}</small></span><ExternalLink size={13}/></a>)}</div>:<div className="empty-evidence"><div className="empty-radar"><span/><span/><span/><CircleDot size={19}/></div><strong>Awaiting first discovery</strong><p>Verified citations and source signals will appear here as you research.</p></div>}
           <div className="panel-bottom"><LockKeyhole size={15}/><span>Evidence is retrieved from indexed records and authorized official pages. Unsupported claims are withheld.</span></div>
         </aside>}
       </div>

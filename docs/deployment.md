@@ -100,3 +100,13 @@ Before public exposure implement an external rate limiter, abuse monitoring, an 
 - Empty source index: ingestion may have been legally blocked or network/robots disallowed. Check `/api/v1/sources/status` before troubleshooting RAG.
 - OpenRouter model picker only shows Auto: catalog endpoint unavailable or no confirmed free individual models; see backend logs.
 - Caddy certificate errors: confirm DNS, incoming 80/443 and `APP_DOMAIN` environment variable.
+
+## Optional Scrapling on production Docker
+
+The production Compose build accepts `ENABLE_SCRAPLING` and the API/worker
+receive `SCRAPER_ENGINE` from `.env.production`. To enable the optional
+Scrapling HTTP engine, set both to `true` and `scrapling` respectively, then
+**rebuild** with the documented production Compose command. No separate
+Scrapling browser executable or Playwright installation is necessary.
+Do not enable Wasalt collection without written source authorization.
+See [Scrapling engine](scrapling.md).

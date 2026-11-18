@@ -15,3 +15,6 @@ coverage/
 .DS_Store
 models-cache/
 backups/
+
+# Native scraped/derived data and model cache (do not commit).
+/data/

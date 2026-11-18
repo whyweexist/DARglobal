@@ -18,6 +18,14 @@
 - `WASALT_AUTHORIZED=true` **and** `WASALT_AUTHORIZATION_REFERENCE=...` provide an administrative attestation, not independent verification. The operator must retain the actual permission document securely.
 - Authorized export alternative: CSV/JSON with source `url`, `title`, `content` and optional `language`. The import also requires an authorization reference.
 
+## Selectable crawling engines
+
+Both official-source adapters support `--engine httpx` (default) or
+`--engine scrapling` (optional fetcher extra). Engine selection does **not**
+change source access rules. HTTPX checks robots/sitemaps regardless of engine;
+Scrapling uses asynchronous HTTP fetching and native CSS link selection only.
+See [Scrapling integration](scrapling.md).
+
 ## Source metadata
 
 The database records source status, last successful ingestion, page URL, SHA-256 hash, fetched time, language, ingestion method and last run report. The app separates `authorized_crawl`, `on_demand_crawl` and `authorized_import`.

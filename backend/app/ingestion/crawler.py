@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse, urldefrag
 import xml.etree.ElementTree as ET
 import httpx
-from bs4 import BeautifulSoup
 from app.core.config import settings
-from app.ingestion.policy import SourcePolicy, PolicyDenied, USER_AGENT, permitted_request, validate_official_url
+from app.ingestion.policy import SourcePolicy, PolicyDenied, USER_AGENT, validate_official_url
 from app.ingestion.parser import parse_html
+from app.ingestion.fetchers import fetch_allowed_page, require_engine, scrapling_available
 from app.rag.indexer import upsert_page
 
 log = logging.getLogger(__name__)
@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class CrawlReport:
     source: str
+    engine: str = "httpx"
     status: str = "complete"
     fetched: int = 0
     inserted: int = 0
@@ -80,15 +81,22 @@ async def discover_sitemap(client: httpx.AsyncClient, policy: SourcePolicy, url:
 
 
 async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
-                dry_run: bool = False, discover_only: bool = False) -> CrawlReport:
+                dry_run: bool = False, discover_only: bool = False,
+                engine: str | None = None) -> CrawlReport:
     config = settings()
-    report = CrawlReport(source=source)
+    selected_engine = require_engine(engine or config.scraper_engine)
+    report = CrawlReport(source=source, engine=selected_engine)
     limit = max_pages or config.crawl_max_pages
     # Explicit permission gate happens before ANY network access.
     try:
         validate_official_url(base_url, source)
     except PolicyDenied as exc:
         report.status, report.detail = "permission_required", str(exc)
+        return report
+    if selected_engine == "scrapling" and not (dry_run or discover_only) and not scrapling_available():
+        report.status = "unavailable"
+        report.detail = 'Scrapling fetcher is not installed (enable optional dependency and rebuild)'
+        report.errors = 1
         return report
     async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xml"},
                                   trust_env=False, limits=httpx.Limits(max_connections=3)) as client:
@@ -112,19 +120,18 @@ async def crawl(source: str, base_url: str, *, max_pages: int | None = None,
                     report.urls.append(current)
                     report.fetched += 1
                     continue
-                html = await permitted_request(client, policy, current, source)
+                fetched = await fetch_allowed_page(client, policy, current, source, engine=selected_engine)
                 report.fetched += 1
                 report.urls.append(current)
-                parsed = parse_html(html, source)
+                parsed = parse_html(fetched.html, source)
                 if parsed.sections:
-                    outcome = upsert_page(source, current, parsed)
+                    outcome = upsert_page(source, fetched.url, parsed, method=f"authorized_{selected_engine}_crawl")
                     setattr(report, outcome, getattr(report, outcome) + 1)
                 else:
                     report.skipped += 1
                 if len(candidates) < limit * 5:
-                    soup = BeautifulSoup(html, "lxml")
-                    for link in soup.find_all("a", href=True)[:250]:
-                        href = urldefrag(urljoin(current, link["href"]))[0]
+                    for link in fetched.links:
+                        href = urldefrag(urljoin(fetched.url, link))[0]
                         try:
                             validate_official_url(href, source)
                             if eligible_link(source, href) and href not in seen:

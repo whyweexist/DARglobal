@@ -16,11 +16,11 @@ class ModelRegistry:
         self._lock = asyncio.Lock()
         self._catalog_reachable = False
 
-    async def catalog(self) -> list[dict]:
-        if time.monotonic() - self._last_fetch < settings().model_catalog_ttl_seconds:
+    async def catalog(self, refresh: bool = False) -> list[dict]:
+        if not refresh and self._last_fetch and time.monotonic() - self._last_fetch < settings().model_catalog_ttl_seconds:
             return self._models
         async with self._lock:
-            if time.monotonic() - self._last_fetch < settings().model_catalog_ttl_seconds:
+            if not refresh and self._last_fetch and time.monotonic() - self._last_fetch < settings().model_catalog_ttl_seconds:
                 return self._models
             try:
                 async with httpx.AsyncClient(timeout=12, trust_env=False) as client:
@@ -33,7 +33,7 @@ class ModelRegistry:
                     if not self._free(price):
                         continue
                     model_id = record.get("id")
-                    if not isinstance(model_id, str):
+                    if not isinstance(model_id, str) or not model_id.endswith(":free"):
                         continue
                     modalities = record.get("architecture", {}).get("input_modalities", ["text"])
                     output_modalities = record.get("architecture", {}).get("output_modalities", ["text"])
@@ -47,7 +47,7 @@ class ModelRegistry:
                 self._models = eligible[:300]
                 self._catalog_reachable = True
                 self._last_fetch = time.monotonic()
-            except (httpx.HTTPError, ValueError, TypeError) as exc:
+            except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
                 log.warning("OpenRouter catalog unavailable: %s", type(exc).__name__)
                 self._catalog_reachable = False
                 self._last_fetch = time.monotonic() - settings().model_catalog_ttl_seconds + 60
@@ -56,16 +56,16 @@ class ModelRegistry:
     @staticmethod
     def _free(pricing: dict) -> bool:
         try:
-            return bool(pricing) and all(float(pricing.get(key, "0")) == 0.0
-                                         for key in ("prompt", "completion", "request"))
+            return all(key in pricing for key in ("prompt", "completion")) and all(
+                float(pricing.get(key, "0")) == 0.0 for key in ("prompt", "completion", "request"))
         except (ValueError, TypeError):
             return False
 
-    async def options(self) -> dict:
-        models = await self.catalog()
+    async def options(self, refresh: bool = False) -> dict:
+        models = await self.catalog(refresh=refresh)
         return {"models": [{"id": "openrouter/free", "name": "Auto · Free router", "free": True,
                             "tools": False, "context_length": None}] + models,
-                "catalog_online": self._catalog_reachable, "configured": bool(settings().openrouter_api_key)}
+                "catalog_online": self._catalog_reachable, "catalog_count": len(models), "configured": bool(settings().openrouter_api_key)}
 
     async def validate(self, value: str) -> None:
         if value == "openrouter/free":

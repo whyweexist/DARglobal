@@ -3,6 +3,8 @@ x-api-image: &api-image
   build:
     context: .
     dockerfile: Dockerfile.api
+    args:
+      ENABLE_SCRAPLING: ${ENABLE_SCRAPLING:-false}
   image: estate-intelligence-api:local
 x-env: &backend-env
   env_file:

@@ -19,7 +19,7 @@ def record_ingestion(report: CrawlReport) -> None:
     with session_factory()() as db:
         row = IngestionRun(source_id=report.source, status=report.status, fetched=report.fetched,
                            inserted=report.inserted, updated=report.updated, skipped=report.skipped,
-                           errors=report.errors, detail=report.detail, finished_at=datetime.now(timezone.utc))
+                           errors=report.errors, detail=f"engine={report.engine}; {report.detail}", finished_at=datetime.now(timezone.utc))
         db.add(row)
         source = db.get(Source, report.source)
         if source:

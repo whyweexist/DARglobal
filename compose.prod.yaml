@@ -1,6 +1,6 @@
 name: estate-intelligence-prod
 x-api-image: &api-image
-  build: {context: ., dockerfile: Dockerfile.api}
+  build: {context: ., dockerfile: Dockerfile.api, args: {ENABLE_SCRAPLING: "${ENABLE_SCRAPLING:-false}"}}
   image: estate-intelligence-api:prod
 x-api-env: &api-env
   env_file: [.env.production]

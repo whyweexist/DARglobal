@@ -24,3 +24,12 @@ button,input,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:
 @media(max-width:380px){.landing h1{font-size:47px}.arch-bottom span:nth-child(2){display:none}.hero-brow-number{display:none}.suggest-card strong{font-size:10px}.model-trigger strong{max-width:155px}.suggest-heading .right-tip{display:none}}
 
 .recent-section{padding-top:22px}.recent-list{display:flex;flex-direction:column;gap:4px;max-height:235px;overflow:auto;scrollbar-width:thin}.recent-item{display:flex;align-items:center;border-radius:4px;border:1px solid transparent}.recent-item:hover,.recent-item.recent-current{background:#26392d;border-color:#3b5041}.recent-item>button:first-child{display:flex;align-items:center;gap:9px;flex:1;min-width:0;padding:9px 7px;border:none;background:transparent;color:#bbc8bb;text-align:left;font-size:10px}.recent-item>button:first-child span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-item svg{flex-shrink:0;color:#8da18e}.recent-item .recent-delete{border:none;background:transparent;color:#839e87;padding:7px;opacity:.25}.recent-item:hover .recent-delete{opacity:1}.recent-item .recent-delete:hover{color:#e7c199}
+
+/* Operational states are visible, rather than hidden in the API payload. */
+.catalog-status{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;font-size:11px;color:inherit;opacity:.85;border-bottom:1px solid rgba(130,130,130,.18)}
+.catalog-status button{border:1px solid rgba(130,130,130,.35);background:transparent;color:inherit;border-radius:5px;padding:4px 8px;cursor:pointer;font-size:11px}
+.catalog-status button:disabled{opacity:.5;cursor:wait}
+.diagnostic-line{display:block;font-size:11px;color:inherit;opacity:.75;padding:5px 0;text-transform:none}
+.research-diagnostics{font-size:12px;margin:8px 0;opacity:.8;overflow-wrap:anywhere}
+.research-diagnostics summary{cursor:pointer}
+.evidence-item small{overflow-wrap:anywhere}

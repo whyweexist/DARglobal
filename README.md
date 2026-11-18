@@ -41,13 +41,105 @@ The frontend uses a custom deep-forest editorial theme with an architectural res
 
 **Codespaces previews are not guaranteed to remain live after a Codespace stops.** See [deployment](docs/deployment.md) for persistent public hosting.
 
+## Run without Docker — Codespaces or local Linux
+
+Prerequisites: Python 3.12/3.13, `uv`, Node.js 22, pnpm 9, Bash, Make and curl. Codespaces already configures these. Native runs do not need a Docker daemon.
+
+```bash
+cp -n .env.example .env
+# Edit .env: set OPENROUTER_API_KEY to your OpenRouter API key.
+make local
+```
+
+`make local` installs Python dependencies on the first run, migrates and initializes SQLite, performs permitted startup ingestion and indexing, runs the API and scheduled worker, and launches Next.js. Open forwarded port 3000; port 8000 is the local API. Press Ctrl+C to stop. If another instance is using either port, stop that instance before launching.
+
+Native SQLite database: **`data/estate.db`**. Model cache: `data/models-cache/`. This is separate from the Docker volume, so switching from Docker to native requires ingestion into the new database (or an explicit, safe backup/restore). No data is invented or pre-seeded. You may set `SCRAPE_ON_BOOT=false` for a quick empty-index startup, then ingest manually.
+
+### Terminal-only workflow
+
+```bash
+make local-setup
+make local-doctor
+make local-check-ai
+make local-scrape-darglobal
+make local-index
+make stats
+make models
+make search Q="Dubai project amenities"
+make chat
+make export
+```
+
+`make local-check-ai` sends a tiny direct completion request to the chosen free model, separately from RAG, and reports the HTTP status/error reason without exposing your key. It consumes one model request. `make chat` keeps recent context in memory for that terminal session; enter `/new` for a clean chat and `/exit` to end. `make chat ARGS='--question "What developments are documented in Dubai?"'` runs a single question. The site-backed API and interactive terminal chat share the same native SQLite index.
+
+`make local-api` launches only FastAPI; `make local-ingest` refreshes permitted sources, and `make local-scrape-wasalt` requires independently documented authorization. `make export` writes real stored documents, properties and chunks to CSV/JSON under `data/exports/`, which is gitignored. Keep these exports private unless the content license permits redistribution.
+
+If you change dependencies or enable optional Scrapling after the first install, rerun `make local-setup`. To enable Scrapling in native mode, set `SCRAPER_ENGINE=scrapling` and `ENABLE_SCRAPLING=true` in `.env` before setup.
+
+### If the chatbot was returning the same answer every time
+
+This release replaces the old repetitive evidence-only response with precise failure reasons. It gates retrieval on actual query terms and requested fields, suppresses near-duplicate chunks, attempts authorized live discovery for missing evidence, validates numeric facts against the cited excerpts, and recognizes an explicit model abstention as a valid response. Prior chat text is used only to resolve follow-up references, not as factual evidence. New research sessions have independent conversation IDs and cancel stale in-flight responses.
+
+Run `make local-check-ai` or (Docker) `make check-ai` to isolate credentials/provider errors from retrieval. Check `make stats` and `make search Q="your question"` in native mode for missing data. In Docker use `make refresh` and `make index` to update the existing volume; don't delete the volume merely to fix an API error. See [troubleshooting](docs/troubleshooting.md).
+
+## Optional Scrapling scraping engine
+
+The source collection layer supports **two selectable engines**, both using the same
+source authorization, robots.txt checks, URL allowlist, bounded crawl and SQLite RAG ingestion:
+
+| Engine | Behavior | Dependency |
+|---|---|---|
+| `httpx` (default) | HTTPX streaming fetch + BeautifulSoup link extraction | Included |
+| `scrapling` | Scrapling `AsyncFetcher` HTTP fetch + native CSS link extraction | Opt-in `scrapling[fetchers]==0.5.1` |
+
+**Enable Scrapling in GitHub Codespaces / Docker:** in `.env`, set:
+
+```env
+ENABLE_SCRAPLING=true
+SCRAPER_ENGINE=scrapling
+```
+
+Run **`make up`**. The Docker build argument installs the optional Python extra,
+and the environment variable selects it for scheduled ingestion, independent
+source scripts and on-demand official-source discovery. Switching back to
+`SCRAPER_ENGINE=httpx` doesn't require reinstalling anything. Setting
+`ENABLE_SCRAPLING=false` and rebuilding excludes Scrapling from the image.
+
+**Single script override**, within the Docker API container:
+
+```bash
+docker compose run --rm --no-deps api python /app/scripts/scrape_darglobal.py --engine scrapling --max-pages 10
+```
+
+Locally without Docker, install the optional extra before selecting the engine:
+
+```bash
+cd backend
+uv sync --extra scrapling --extra dev
+cd ..
+bash scripts/local.sh scrape-darglobal --engine scrapling --max-pages 10
+```
+
+The Wasalt script accepts `--engine scrapling` too, but **still refuses to fetch
+without documented authorization**. Scrapling does not grant collection rights.
+
+This integration deliberately uses Scrapling's **ordinary HTTP fetcher**, not
+StealthyFetcher, browser automation, CAPTCHA solving, proxies or bot evasion.
+Robots/sitemaps are checked through HTTPX; Scrapling fetches and parses permitted
+HTML pages. Responses are checked for type and size (Scrapling buffers the body
+before this post-fetch check), and redirects are validated per hop. There is no
+silent fallback to HTTPX if the selected Scrapling engine is unavailable.
+
+See [Scrapling integration documentation](docs/scrapling.md) and the
+[Scrapling repository](https://github.com/D4Vinci/Scrapling).
+
 ## Source collection
 
 Independent scripts (from repository root):
 
 ```bash
-PYTHONPATH=backend python scripts/scrape_darglobal.py --max-pages 20
-PYTHONPATH=backend python scripts/scrape_wasalt.py --max-pages 20 --dry-run
+PYTHONPATH=backend python scripts/scrape_darglobal.py --max-pages 20 --engine httpx
+PYTHONPATH=backend python scripts/scrape_wasalt.py --max-pages 20 --dry-run --engine httpx
 ```
 
 Docker-based equivalent after setup:
@@ -76,10 +168,35 @@ See `.env.example` for all settings. Important fields:
 | `FREE_MODELS_ONLY` | Must remain enabled on a free-only deployment |
 | `DATABASE_URL` | SQLite file under persistent `/data` |
 | `SCRAPE_ON_BOOT` | Enables gated initial refresh |
+| `SCRAPER_ENGINE` | `httpx` or `scrapling` for source and live discovery fetching |
+| `ENABLE_SCRAPLING` | Docker build arg that installs Scrapling optional dependencies |
 | `WASALT_AUTHORIZED` | Source access gate; false by default |
 | `WASALT_AUTHORIZATION_REFERENCE` | Reference to verifiable written permission |
 | `EMBEDDING_MODEL` | CPU multilingual model |
 | `RAG_LIVE_SEARCH` | Enables authorized on-demand sitemap discovery |
+
+## CPU-only PyTorch in Docker (Codespaces build fix)
+
+The sentence-transformers dependency requires PyTorch, but Codespaces and this
+application use **CPU embedding inference**. Default Linux x86_64 PyPI PyTorch
+resolution can pull several GB of NVIDIA/CUDA wheels (`nvidia-cusparse`, etc.),
+causing install timeouts and excessive Docker image sizes.
+
+`Dockerfile.api` pins uv 0.10.0 and resolves PyTorch through uv's CPU backend
+(on x86_64 only); ARM64 uses its CPU-only PyPI wheel. A build-time check rejects
+CUDA-enabled PyTorch and `uv pip check` validates dependency consistency.
+The `backend/pyproject.toml` also routes local `uv run`/`uv sync` on Linux x86_64
+to the official PyTorch CPU wheel index. CI uses the same CPU path. This **does not
+disable** semantic RAG or change the embedding model/vector dimensions.
+
+After updating the repository in Codespaces, rebuild without the cached failed
+layer: `docker compose build --no-cache api`, then run `make up`. CPU-only PyTorch
+is still a sizable download, and access to the official PyTorch CPU index is
+required; a network timeout there is not a CUDA problem.
+
+## Packaging and optional evaluation files
+
+The backend Dockerfile deliberately creates `/app/evaluations/retrieval` rather than copying an optional, potentially empty host directory. This keeps `make up` compatible with fresh clones and ZIP extraction (ZIP archives may omit empty folders). `make eval` mounts your local `evaluations/` directory read-only; see [`evaluations/README.md`](evaluations/README.md).
 
 ## Useful commands
 
@@ -115,6 +232,7 @@ See `.env.example` for all settings. Important fields:
 
 - [RAG system](docs/rag-design.md)
 - [Ingestion and permissions](docs/data-sources.md)
+- [Scrapling engine](docs/scrapling.md)
 - [Tool policies](docs/agent-tools.md)
 - [SQLite model](docs/database.md)
 - [API and SSE](docs/api.md)

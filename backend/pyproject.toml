@@ -7,10 +7,11 @@ dependencies = [
   "fastapi>=0.115,<1", "uvicorn[standard]>=0.34,<1", "pydantic-settings>=2.7,<3",
   "sqlalchemy>=2.0,<3", "alembic>=1.14,<2", "httpx>=0.28,<1",
   "beautifulsoup4>=4.12,<5", "lxml>=5.3,<7", "tiktoken>=0.9,<1",
-  "sqlite-vec>=0.1.6,<0.2", "sentence-transformers>=3.4,<6",
+  "sqlite-vec>=0.1.6,<0.2", "sentence-transformers>=3.4,<6", "torch>=2.5,<3",
   "numpy>=1.26,<3", "tenacity>=9,<10", "orjson>=3.10,<4"
 ]
 [project.optional-dependencies]
+scrapling = ["scrapling[fetchers]==0.5.1"]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "pytest-cov>=6,<8", "ruff>=0.11,<1", "mypy>=1.15,<2"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -30,3 +31,13 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+# uv project-mode installs (`uv run`, `uv sync`) must also select CPU-only
+# PyTorch on Linux x86_64. Docker's `uv pip install` uses UV_TORCH_BACKEND=cpu.
+[tool.uv.sources]
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.db.session import engine, vector_loaded
 
 log = logging.getLogger(__name__)
-STOPWORDS = {"the", "a", "an", "in", "on", "for", "of", "and", "or", "to", "are", "is", "what", "which", "show", "me", "tell", "about", "has", "have", "does", "with", "please", "where", "can", "find", "price", "property", "properties", "project", "projects", "latest", "information", "available", "details"}
+STOPWORDS = {"darglobal", "wasalt", "real", "estate", "development", "developments", "documented", "verified", "source", "sources", "current", "give", "list", "all", "these", "those", "their", "them", "its", "then", "also", "instead", "most", "about", "the", "a", "an", "in", "on", "for", "of", "and", "or", "to", "are", "is", "what", "which", "show", "me", "tell", "about", "has", "have", "does", "with", "please", "where", "can", "find", "property", "properties", "project", "projects", "latest", "information", "available", "details"}
 
 
 @dataclass
@@ -29,7 +29,7 @@ class Evidence:
 
 def significant_tokens(query: str) -> list[str]:
     words = re.findall(r"[\w\u0600-\u06ff]+", query.casefold(), re.UNICODE)
-    return list(dict.fromkeys(x for x in words if len(x) > 2 and x not in STOPWORDS))[:16]
+    return list(dict.fromkeys(x for x in words if (len(x) > 2 or x.isdigit()) and x not in STOPWORDS))[:16]
 
 
 def match_expr(query: str) -> str:
@@ -65,6 +65,9 @@ def lexical_search(query: str, source_filter: list[str] | None = None, limit: in
 def semantic_search(query: str, source_filter: list[str] | None = None, limit: int = 20) -> list[Evidence]:
     if not vector_loaded():
         return []
+    with engine().connect() as conn:
+        if not conn.execute(text("SELECT rowid FROM chunk_vectors LIMIT 1")).first():
+            return []
     from app.rag.embeddings import encode, serialize
     values = encode([query])
     if not values:
@@ -161,17 +164,40 @@ class HybridRetriever:
                 merged[evidence.chunk_id] = evidence
                 scores[evidence.chunk_id] = scores.get(evidence.chunk_id, 0) + weight / (60 + rank + 1)
         ordered = sorted(merged.values(), key=lambda ev: scores[ev.chunk_id], reverse=True)
-        # Conservative lexical support for named entity relevance; semantic-only matches
-        # remain eligible if sufficiently related but require at least one significant term
-        # for evidence-gating downstream.
+        # Require substantive word-level support and prefer specific pages over a
+        # homepage that merely mentions the requested source or a generic keyword.
         filtered = [ev for ev in ordered if self._plausible(query, ev)]
-        return self.reranker.rerank(query, filtered, top_k), degraded
+        terms = set(significant_tokens(query))
+        def quality(ev):
+            words = set(re.findall(r"\w+", (ev.text + " " + ev.title).casefold()))
+            title_words = set(significant_tokens(ev.title))
+            return (len(terms & words) / max(1, len(terms)),
+                    len(terms & title_words), scores[ev.chunk_id])
+        filtered.sort(key=quality, reverse=True)
+        distinct = []
+        url_counts = {}
+        for ev in filtered:
+            words = set(re.findall(r"\w+", ev.text.casefold()))
+            duplicate = any(len(words & old) / max(1, min(len(words), len(old))) >= .80
+                            for _, old in distinct)
+            if duplicate or url_counts.get(ev.url, 0) >= 2:
+                continue
+            distinct.append((ev, words))
+            url_counts[ev.url] = url_counts.get(ev.url, 0) + 1
+        return self.reranker.rerank(query, [ev for ev,_ in distinct], top_k), degraded
 
     @staticmethod
     def _plausible(query: str, ev: Evidence) -> bool:
-        tokens = significant_tokens(query)
-        if not tokens:
+        terms = set(significant_tokens(query))
+        if not terms:
             return False
-        searchable = (ev.text + " " + ev.title).casefold()
-        overlap = sum(t in searchable for t in tokens)
-        return overlap >= 1
+        words = set(significant_tokens(ev.title)) | set(re.findall(r"\w+", ev.text.casefold()))
+        # Accept singular/plural morphological variants, but not arbitrary substrings.
+        stem = lambda w: w[:-1] if len(w) > 4 and w.endswith('s') else w
+        terms = {stem(t) for t in terms}
+        words = {stem(t) for t in words}
+        overlap = terms & words
+        # More specific questions must match more than one concept. Generic
+        # property/developer tokens are not sufficient by themselves.
+        minimum = 1 if len(terms) == 1 else max(2, (len(terms)+1)//2)
+        return len(overlap) >= minimum
