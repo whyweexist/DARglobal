@@ -24,10 +24,10 @@ RUN set -eu; \
       export UV_TORCH_BACKEND=cpu; \
     fi; \
     if [ "$ENABLE_SCRAPLING" = "true" ]; then \
-      uv pip install --system --no-cache '.[scrapling]'; \
+      uv pip install --system --no-cache '.[local-embeddings,scrapling]'; \
       python -c 'from scrapling.fetchers import FetcherSession; from importlib.metadata import version; print("Scrapling", version("scrapling"))'; \
     else \
-      uv pip install --system --no-cache .; \
+      uv pip install --system --no-cache '.[local-embeddings]'; \
     fi; \
     python -c 'import torch; assert torch.version.cuda is None, "A CUDA-enabled PyTorch build was installed"; print("CPU-only PyTorch:", torch.__version__)'; \
     uv pip check --system

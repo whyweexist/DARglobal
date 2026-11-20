@@ -4,12 +4,15 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import secrets
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -29,7 +32,31 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize()
+    cfg = settings()
+    if cfg.scrape_on_boot:
+        with engine().connect() as conn:
+            document_count = conn.execute(text("SELECT COUNT(*) FROM documents")).scalar_one()
+        if document_count == 0:
+            async def initial_ingestion():
+                try:
+                    from app.cli import ingest
+                    from app.rag.indexer import index_missing_vectors
+
+                    report = await ingest()
+                    indexing = await asyncio.to_thread(index_missing_vectors)
+                    log.info("Initial ingestion complete: %s | indexing: %s", report, indexing)
+                except Exception:
+                    log.exception("Initial ingestion failed")
+
+            app.state.initial_ingestion_task = asyncio.create_task(initial_ingestion())
     yield
+    task = getattr(app.state, "initial_ingestion_task", None)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Estate Intelligence API", version="1.0.0", lifespan=lifespan)
@@ -217,3 +244,8 @@ async def delete_conversation(conversation_id: str, x_conversation_token: str = 
         db.delete(obj)
         db.commit()
         return {"status": "deleted"}
+
+
+static_dir = os.getenv("SERVE_STATIC_DIR", "")
+if static_dir and Path(static_dir).is_dir():
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")

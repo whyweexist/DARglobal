@@ -220,8 +220,18 @@ See `.env.example` for all settings. Important fields:
 | `ENABLE_SCRAPLING` | Docker build arg that installs Scrapling optional dependencies |
 | `WASALT_AUTHORIZED` | Source access gate; false by default |
 | `WASALT_AUTHORIZATION_REFERENCE` | Reference to verifiable written permission |
-| `EMBEDDING_MODEL` | CPU multilingual model |
+| `EMBEDDING_PROVIDER` | `local` (default), `gemini`, `openai_compatible`, or `huggingface` |
+| `EMBEDDING_API_KEY` | Server-side key for the selected HTTP embedding provider |
+| `EMBEDDING_API_URL` | Optional embedding endpoint override |
+| `EMBEDDING_MODEL` | Local or provider model name |
 | `RAG_LIVE_SEARCH` | Enables authorized on-demand sitemap discovery |
+
+The local CPU embedding provider is an optional dependency group. Docker Compose
+and CI include it for full local compatibility; memory-constrained deployments
+can select an HTTP provider and avoid installing PyTorch and SentenceTransformers.
+The single-container free-tier Render setup is defined by `render.yaml` and
+`Dockerfile.render`; add the `OPENROUTER_API_KEY` and `EMBEDDING_API_KEY` secrets
+in Render. Gemini embeddings are selected by default there.
 
 ## CPU-only PyTorch in Docker (Codespaces build fix)
 
@@ -230,7 +240,8 @@ application use **CPU embedding inference**. Default Linux x86_64 PyPI PyTorch
 resolution can pull several GB of NVIDIA/CUDA wheels (`nvidia-cusparse`, etc.),
 causing install timeouts and excessive Docker image sizes.
 
-`Dockerfile.api` pins uv 0.10.0 and resolves PyTorch through uv's CPU backend
+`Dockerfile.api` pins uv 0.10.0 and installs the `local-embeddings` extra,
+resolving PyTorch through uv's CPU backend
 (on x86_64 only); ARM64 uses its CPU-only PyPI wheel. A build-time check rejects
 CUDA-enabled PyTorch and `uv pip check` validates dependency consistency.
 The `backend/pyproject.toml` also routes local `uv run`/`uv sync` on Linux x86_64

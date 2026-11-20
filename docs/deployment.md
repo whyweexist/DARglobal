@@ -13,6 +13,17 @@
 
 The Codespace may stop automatically and its URL may become unavailable. This is suitable for assessment but not guaranteed always-on production hosting.
 
+## Render Free single-container deployment
+
+The root `render.yaml` Blueprint builds `Dockerfile.render`, which exports the
+Next.js frontend and serves it from the FastAPI container on the same origin.
+The image uses the Gemini HTTP embedding provider and does not install
+PyTorch/SentenceTransformers. Set the `OPENROUTER_API_KEY` and
+`EMBEDDING_API_KEY` secrets when creating the Render service; override
+`EMBEDDING_PROVIDER` and optionally `EMBEDDING_API_URL` to use another supported
+provider or compatible endpoint. The Free plan's filesystem is ephemeral, so
+local SQLite data is not durable across instance replacement.
+
 ## B. Production Docker deployment (single persistent VPS)
 
 ### Prerequisites

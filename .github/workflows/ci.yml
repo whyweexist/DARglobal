@@ -13,7 +13,7 @@ jobs:
         run: |
           pip install uv
           cd backend
-          uv pip install --system --torch-backend cpu -e '.[dev,scrapling]'
+          uv pip install --system --torch-backend cpu -e '.[dev,scrapling,local-embeddings]'
           python -c 'from scrapling.fetchers import FetcherSession'
       - name: Tests
         env:

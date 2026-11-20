@@ -7,6 +7,7 @@ from app.db.session import engine
 def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{tmp_path}/test.db')
     monkeypatch.setenv('OPENROUTER_API_KEY', '')
+    monkeypatch.setenv('SCRAPE_ON_BOOT', 'false')
     monkeypatch.setenv('RAG_LIVE_SEARCH', 'false')
     monkeypatch.setenv('WASALT_AUTHORIZED', 'false')
     settings.cache_clear()

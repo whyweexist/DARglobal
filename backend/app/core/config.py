@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     wasalt_max_category_pages: int = Field(default=3, ge=1, le=20)
     wasalt_authorized: bool = False
     wasalt_authorization_reference: str = ""
+    embedding_provider: Literal["local", "gemini", "openai_compatible", "huggingface"] = "local"
+    embedding_api_key: str = ""
+    embedding_api_url: str = ""
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = Field(default=384, ge=16)
     chunk_target_tokens: int = Field(default=400, ge=80, le=1200)

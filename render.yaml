@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: darglobal
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/health/live
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: EMBEDDING_API_KEY
+        sync: false
